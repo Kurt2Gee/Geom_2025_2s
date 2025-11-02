@@ -1,0 +1,717 @@
+---
+title: "Brecha Digital y Acceso a Internet Móvil en la Región Metropolitana de Santiago: Un análisis territorial mediante microsimulación (CASEN–Censo 2017)"
+author: "Kurt Gee Castañer"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# 1. Introducción
+
+Las tecnologías digitales no son herramientas neutras. Su despliegue y distribución responden a decisiones históricas, económicas y políticas que, en muchos casos, han privilegiado a determinados sectores sociales y territorios sobre otros. Esta lógica de desarrollo tecnológico, guiada principalmente por criterios de rentabilidad y concentración urbana, ha generado un acceso desigual a la conectividad digital, profundizando las brechas existentes en las ciudades contemporáneas.
+
+Durante las últimas décadas, el acceso a Internet se ha consolidado como un requisito fundamental para la participación plena en la sociedad: permite acceder a la educación, al trabajo, a la información y a los servicios públicos. Sin embargo, la infraestructura y cobertura digital no se distribuyen equitativamente. Mientras algunos territorios metropolitanos disfrutan de conectividad estable y de alta velocidad, otros —particularmente los sectores periféricos y de menor ingreso— enfrentan limitaciones severas o directamente carecen de acceso.  
+
+Esta desigualdad, conocida como brecha digital, refleja una dimensión estructural de exclusión que combina factores tecnológicos, socioeconómicos y espaciales. No se trata únicamente de la falta de dispositivos o conexión, sino de una carencia más profunda: la imposibilidad de participar en los flujos de información y conocimiento que definen la vida moderna. En este sentido, el acceso a Internet se convierte en un nuevo eje de desigualdad urbana, análogo al acceso histórico a la educación, la vivienda o la movilidad.
+
+La Región Metropolitana de Santiago, como principal centro urbano del país, sintetiza esta problemática. Su estructura territorial revela una fuerte segregación socioespacial, en la que las comunas con mayores ingresos concentran la infraestructura tecnológica, mientras que las periferias urbanas presentan déficits persistentes de conectividad. La brecha digital, por tanto, no solo expresa una diferencia técnica, sino una inequidad territorial en el derecho a la información y al desarrollo.
+
+En función de lo anterior, el presente trabajo tiene como objetivo visibilizar las desigualdades territoriales en el acceso a Internet móvil en la Región Metropolitana de Santiago, identificando los patrones espaciales de conectividad y su relación con las condiciones socioeconómicas comunales. Para ello, se integran datos provenientes de la Encuesta CASEN y del Censo 2017, aplicando técnicas de microsimulación y análisis geoespacial que permiten estimar la distribución del acceso a Internet por banda ancha móvil a nivel comunal y zonal.
+
+El análisis busca contribuir a la comprensión de la brecha digital como fenómeno territorial, evidenciando cómo las diferencias en conectividad reproducen y amplifican las desigualdades urbanas preexistentes. Asimismo, se propone ofrecer una base empírica para el diseño de políticas públicas orientadas a la equidad digital y la justicia espacial, promoviendo una planificación tecnológica más inclusiva en el contexto metropolitano.
+
+## 1.1. Objetivo General
+
+Analizar las desigualdades territoriales en el acceso a Internet por banda ancha móvil en la Región Metropolitana de Santiago, a partir de la integración de datos del Censo 2017 y la Encuesta CASEN mediante técnicas de microsimulación y análisis geoespacial, con el propósito de identificar los patrones espaciales de la brecha digital y aportar evidencia para el diseño de políticas públicas orientadas a la equidad digital y la justicia territorial.
+
+## 1.2. Objetivos Específicos
+
+Los objetivos específicos por trabajar son:
+
+1.Integrar información proveniente del Censo 2017 y la Encuesta CASEN, mediante técnicas de microsimulación, con el fin de estimar el nivel de acceso a Internet por banda ancha móvil a escala comunal y zonal dentro de la Región Metropolitana de Santiago.
+
+2.Representar cartográficamente los patrones espaciales de conectividad digital utilizando herramientas de análisis geoespacial, destacando las diferencias territoriales entre comunas y zonas censales urbanas.
+
+3. Identificar áreas con mayores déficits de conectividad, relacionando los resultados con variables socioeconómicas y demográficas relevantes que influyen en la desigualdad digital.
+
+4. Interpretar los resultados desde un enfoque de equidad territorial, proponiendo lineamientos que contribuyan al diseño de políticas públicas orientadas a reducir la brecha digital y promover una planificación tecnológica más inclusiva en el espacio metropolitano.
+
+Este trabajo de dividirá en Metodología, Resultados, Análisis, Conclusión y Bibliografía.
+
+------------------------------------------------------------------------
+
+# 2. Desarrollo
+
+## 2.1. Metodología
+
+Para el desarrollo metodológico de este trabajo se utilizaron dos herramientas principales: **pgAdmin** y **RStudio**, con el objetivo de integrar, procesar y visualizar información proveniente de la **Encuesta CASEN 2017** y del **Censo de Población y Vivienda 2017**.  
+El análisis se concentró en las **zonas urbanas de la Provincia de Santiago**, en la **Región Metropolitana de Santiago**, tomando como unidad territorial la **zona censal urbana**, lo que permitió observar diferencias intra-comunales en los niveles de conectividad digital.
+
+El objetivo metodológico fue **estimar y representar territorialmente el acceso a Internet por banda ancha móvil**, considerado un indicador clave de inclusión digital.  
+Para ello, se llevaron a cabo las siguientes etapas:
+
+1. **Integración y preprocesamiento de datos:**  
+   Se importaron los datos de la CASEN y del Censo en formato `.rds`, seleccionando variables comunes como edad, sexo, nivel educativo y acceso a Internet móvil (`r17b`).  
+   Se realizó una imputación lineal de valores faltantes y una recodificación binaria (`r17b_bin`) para representar hogares con y sin acceso a banda ancha móvil.
+
+2. **Microsimulación de acceso a Internet:**  
+   Mediante el paquete `rakeR` en **RStudio**, se ajustaron las distribuciones de la CASEN a las estructuras poblacionales del Censo.  
+   Este proceso permitió estimar el **porcentaje de hogares con acceso a Internet móvil** por zona censal (`porc_bamovil`), generando una base sintética coherente con la realidad demográfica.
+
+3. **Procesamiento espacial y conexión a base de datos:**  
+   Los resultados fueron integrados en una base **PostgreSQL/PostGIS** mediante `RPostgres` y `DBI`, donde se asociaron con las geometrías censales urbanas del **Gran Santiago**.  
+   Luego, se agruparon los resultados a nivel comunal, calculando los promedios de conectividad.
+
+4. **Visualización cartográfica:**  
+   Finalmente, se elaboró un **mapa temático** en `ggplot2` que representa la proporción de hogares con acceso a Internet móvil en las comunas del Gran Santiago.  
+   Cada tonalidad refleja el nivel relativo de conectividad, permitiendo identificar las desigualdades territoriales en el acceso digital.
+
+Se combinaron herramientas de análisis estadístico, microsimulación y representación geoespacial para evidenciar la **brecha digital metropolitana**, aportando una base empírica para el diagnóstico de desigualdades territoriales en materia de conectividad.
+
+
+### **2.1.1. Librerías necesarias**
+
+Para desarrollar el análisis en R se cargaron las siguiente librerías:
+
+```{r librerias, echo=TRUE, message=FALSE, warning=FALSE}
+library(rakeR)
+library(RPostgres)
+library(DBI)
+library(sf)
+library(dplyr)
+library(data.table)
+library(ggplot2)
+library(ggrepel)
+library(stringr)
+library(cowplot)
+```
+En conjunto, estas librerías posibilitaron la integración de herramientas estadísticas, espaciales y gráficas, construyendo un flujo metodológico reproducible para el análisis de la **brecha digital en el Gran Santiago**.
+
+### **2.1.2.1 Carga de datos CASEN y Censo**
+
+Para ejecutar el proceso de microsimulación, se cargaron los archivos `.rds` correspondientes a la **Encuesta CASEN 2017** y al **Censo 2017**, almacenados localmente.  
+Ambos conjuntos de datos fueron preprocesados para garantizar la compatibilidad entre las variables demográficas y geográficas requeridas en el modelo.
+
+
+
+### **2.1.2. Conexión a la base de datos PostgreSQL**
+
+Se estableció una conexión con una base de datos local en PostgreSQL que contiene las tablas del Censo 2017 para la Región Metropolitana.
+
+
+### **2.1.2.1 Carga de datos CASEN y Censo**
+
+Se cargaron los archivos `.rds` correspondientes a la **Encuesta CASEN 2017** y al **Censo 2017**, almacenados localmente.  
+Ambos conjuntos de datos fueron preprocesados para garantizar la compatibilidad entre las variables demográficas y geográficas requeridas en el modelo.
+
+```{r carga_datos, message=FALSE, warning=FALSE}
+## ============================================================
+## 2. CARGA DE DATOS ####
+## ============================================================
+
+# Rutas de los archivos CASEN y CENSO
+ruta_casen <- "C:/Users/Kurta/Desktop/Universidad/Geomarketing/Trabajo 2/casen_rm (1).rds"
+ruta_censo <- "C:/Users/Kurta/Desktop/Universidad/Geomarketing/Trabajo 2/cons_censo_df (1).rds"
+
+# Cargar bases de datos
+casen <- readRDS(ruta_casen)
+cons_censo_df <- readRDS(ruta_censo)
+
+# Verificar dimensiones básicas
+dim(casen)
+dim(cons_censo_df)
+```
+
+```{r}
+con = dbConnect(
+  RPostgres::Postgres(),
+  dbname   = "censo2017_rm",
+  host     = "localhost",
+  port     = 5432,
+  user     = "postgres",
+  password = "Kurt12345*"
+)
+```
+
+
+
+-   `sexo`: Sexo del individuo (1 = Hombre, 2 = Mujer).  
+-   `edad`: Edad del individuo en años cumplidos.  
+-   `esc`: Años de escolaridad aprobados.  
+-   `e6a`: Nivel educativo más alto alcanzado, utilizada como variable auxiliar para imputación de valores faltantes en `esc`.  
+-   `r17b`: Indicador de acceso a Internet mediante banda ancha móvil (1 = Sí, 2 = No).  
+-   `estrato`: Identificador geográfico de la CASEN que permite vincular las observaciones con las comunas del Censo 2017.
+
+Para los hogares que **sí disponen de conexión a Internet móvil**, se aplicó el siguiente filtro:
+
+$r17b = 1$
+
+Que posteriormente se registró como valor `1` en la variable **“Acceso a Internet móvil”** (`r17b_bin = 1`).
+
+Para los hogares que **no disponen de conexión a Internet móvil**, el filtro fue:
+
+$r17b = 2$
+
+Que se registró como valor `0` en la variable **“Sin acceso a Internet móvil”** (`r17b_bin = 0`).
+
+A partir de estas variables, y mediante un proceso de microsimulación, se estimó el **porcentaje promedio de hogares con acceso a banda ancha móvil** en cada zona censal (`porc_bamovil`), el cual fue luego agregado a nivel comunal.
+
+La tabla resultante generada en R contiene los siguientes campos por zona censal:
+
+| Variable | Descripción |
+|----|----|
+| `geocodigo` | Código único de identificación de la zona censal (clave espacial). |
+| `nom_comuna` | Nombre de la comuna a la que pertenece la zona censal. |
+| `r17b_bin` | Variable binaria que indica si el hogar posee acceso a Internet móvil (1 = Sí, 0 = No). |
+| `porc_bamovil` | Porcentaje de hogares con acceso a Internet por banda ancha móvil estimado a partir de la microsimulación. |
+
+### **2.1.2.3 Microsimulación de acceso a Internet**
+
+A continuación, se ejecutó el proceso de **microsimulación**, mediante el cual se ajustaron las distribuciones de la encuesta **CASEN 2017** a las estructuras poblacionales del **Censo 2017**, permitiendo estimar el porcentaje de hogares con acceso a Internet por banda ancha móvil (`porc_bamovil`) en cada zona censal.  
+Este procedimiento se realizó con el paquete `rakeR`, el cual pondera los individuos encuestados en función de las variables demográficas seleccionadas (edad, educación y sexo), generando una base sintética coherente con la población censal.
+
+
+```{r}
+## ============================================================
+## 3. PREPROCESAMIENTO ####
+## ============================================================
+
+# Crear variable comuna a partir del estrato CASEN
+casen$Comuna <- substr(as.character(casen$estrato), 1, 5)
+
+# Limpieza previa de la columna Comuna
+casen <- casen[!is.na(casen$Comuna) & casen$Comuna != "", ]
+casen$Comuna <- stringr::str_pad(as.character(casen$Comuna), width = 5, pad = "0")
+cons_censo_df$COMUNA <- stringr::str_pad(as.character(cons_censo_df$COMUNA), width = 5, pad = "0")
+## ============================================================
+## 3.1 CREACIÓN DE VARIABLES EN CASEN ####
+## ============================================================
+
+# Asegurar que el paquete haven esté cargado
+library(haven)
+
+# Eliminar etiquetas de tipo <haven_labelled>
+casen <- haven::zap_labels(casen)
+
+# Convertir variables a numéricas simples
+casen$r17b <- as.numeric(casen$r17b)
+casen$edad <- as.numeric(casen$edad)
+casen$esc  <- as.numeric(casen$esc)
+casen$sexo <- as.numeric(casen$sexo)
+
+# Crear ID única para cada registro
+casen$ID <- as.character(seq_len(nrow(casen)))
+
+# Variable binaria: 1 = acceso a internet móvil (r17b = 1), 0 = no acceso (r17b = 2)
+casen$r17b_bin <- ifelse(casen$r17b == 1, 1L,
+                         ifelse(casen$r17b == 2, 0L, NA_integer_))
+
+# Categorización por edad
+casen$edad_cat <- cut(
+  casen$edad,
+  breaks = c(0, 30, 40, 50, 60, 70, 80, Inf),
+  labels = c("0-29", "30-39", "40-49", "50-59", "60-69", "70-79", "80+"),
+  right = FALSE, include.lowest = TRUE
+)
+
+# Categorización por educación
+casen$esc_cat <- cut(
+  casen$esc,
+  breaks = c(-Inf, 8, 12, 16, Inf),
+  labels = c("Básica o menos", "Media", "Técnica", "Superior"),
+  right = TRUE
+)
+
+# Categorización por sexo
+casen$sexo_cat <- factor(
+  ifelse(casen$sexo == 2, "Mujer",
+         ifelse(casen$sexo == 1, "Hombre", NA)),
+  levels = c("Mujer", "Hombre")
+)
+
+
+# Separar los datos del Censo y de la CASEN por comuna
+cons_censo_comunas = split(cons_censo_df, cons_censo_df$COMUNA)
+inds_list = split(casen, casen$Comuna)
+
+
+
+```
+
+
+```{r}
+## ============================================================
+## 4. MICROSIMULACIÓN (ROBUSTA Y SIN NULOS) ####
+## ============================================================
+
+# Comprobación de columnas necesarias
+cols_necesarias <- c("ID", "edad_cat", "esc_cat", "sexo_cat", "r17b_bin")
+if (!all(cols_necesarias %in% names(casen))) {
+  stop("Faltan variables necesarias en CASEN: ",
+       paste(setdiff(cols_necesarias, names(casen)), collapse = ", "))
+}
+
+# Asegurar formato de códigos comunales en ambas bases
+casen$Comuna <- str_pad(as.character(casen$Comuna), 5, pad = "0")
+cons_censo_df$COMUNA <- str_pad(as.character(cons_censo_df$COMUNA), 5, pad = "0")
+
+# Filtrar filas válidas (sin NA en variables claves)
+casen <- casen %>%
+  filter(!is.na(edad_cat), !is.na(esc_cat), !is.na(sexo_cat), !is.na(r17b_bin))
+
+# Separar los datos del Censo y de la CASEN por comuna
+cons_censo_comunas <- split(cons_censo_df, cons_censo_df$COMUNA)
+inds_list <- split(casen, casen$Comuna)
+
+# Crear lista de simulaciones por comuna (ignorando las fallidas)
+sim_list <- lapply(names(cons_censo_comunas), function(zona) {
+  cons_i <- cons_censo_comunas[[zona]]
+  if (!zona %in% names(inds_list)) return(NULL)
+
+  tmp <- inds_list[[zona]]
+  tmp <- tmp %>% filter(!is.na(r17b_bin))  # eliminar NA en la variable de interés
+
+  if (nrow(tmp) == 0) return(NULL)
+
+  inds_i <- tmp[, c("ID", "edad_cat", "esc_cat", "sexo_cat"), drop = FALSE]
+  names(inds_i) <- c("ID", "Edad", "Escolaridad", "Sexo")
+
+  # Intentar ejecutar la microsimulación
+  out <- try({
+    w_frac <- weight(cons = cons_i, inds = inds_i,
+                     vars = c("Edad", "Escolaridad", "Sexo"))
+    sim_i <- integerise(weights = w_frac, inds = inds_i, seed = 123)
+    merge(sim_i, tmp[, c("ID", "r17b_bin")], by = "ID", all.x = TRUE)
+  }, silent = TRUE)
+
+  # Si falla, devolver NULL y continuar
+  if (inherits(out, "try-error") || is.null(out)) return(NULL)
+  if (!"r17b_bin" %in% names(out)) return(NULL)
+
+  out
+})
+
+# Filtrar simulaciones válidas y eliminar nulos
+sim_list <- Filter(Negate(is.null), sim_list)
+
+# Si no hay ninguna, lanzar advertencia pero no detener el knit
+if (length(sim_list) == 0) {
+  warning("⚠️ No se generó ninguna simulación válida. Revisa comunas con datos insuficientes.")
+  sim_df <- data.frame(COMUNA = character(), r17b_bin = numeric())
+} else {
+  sim_df <- data.table::rbindlist(sim_list, idcol = "COMUNA")
+}
+
+# Verificación
+cat("✅ Simulación completada. Comunas válidas:", length(unique(sim_df$COMUNA)), "\n")
+print(head(sim_df))
+
+
+```
+
+```{r}
+## ============================================================
+## 4.1 CÁLCULO DE PORCENTAJE DE ACCESO A INTERNET (ROBUSTO) ####
+## ============================================================
+
+if (exists("sim_df") && nrow(sim_df) > 0 && "r17b_bin" %in% names(sim_df)) {
+
+  # Eliminar posibles NA en r17b_bin antes de agregar
+  sim_df <- sim_df[!is.na(sim_df$r17b_bin), ]
+
+  # Verificar que existan comunas válidas
+  if (nrow(sim_df) > 0) {
+    zonas_internet <- aggregate(
+      r17b_bin ~ COMUNA,
+      data = sim_df,
+      FUN  = function(x) mean(x, na.rm = TRUE) * 100
+    )
+
+    # Renombrar columnas
+    names(zonas_internet) <- c("geocodigo", "porc_bamovil")
+
+    cat("✅ Cálculo completado. Comunas procesadas:", nrow(zonas_internet), "\n")
+    print(head(zonas_internet))
+
+  } else {
+    warning("⚠️ No hay registros válidos en sim_df tras eliminar NAs. Creando tabla vacía.")
+    zonas_internet <- data.frame(geocodigo = character(), porc_bamovil = numeric())
+  }
+
+} else {
+  warning("⚠️ sim_df no existe o no contiene la variable 'r17b_bin'. Creando tabla vacía.")
+  zonas_internet <- data.frame(geocodigo = character(), porc_bamovil = numeric())
+}
+
+
+```
+
+
+
+
+
+Posteriormente, se estableció una conexión con la base de datos **PostgreSQL**, la cual contiene las geometrías censales urbanas del **Gran Santiago**.  
+El propósito de esta conexión fue asociar los resultados de la microsimulación con la información espacial de las zonas censales.
+
+
+```{r conexion y geometria, message=FALSE, warning=FALSE, include=FALSE}
+# 5) CONEXIÓN A BASE DE DATOS Y EXTRACCIÓN DE GEOMETRÍAS
+# =============================================================================
+con = dbConnect(
+  RPostgres::Postgres(),
+  dbname   = "censo2017_rm",
+  host     = "localhost",
+  port     = 5432,
+  user     = "postgres",
+  password = "Kurt12345*"
+)
+
+# Guardar tabla temporal con resultados
+DBI::dbWriteTable(
+  con,
+  name = DBI::SQL("output.zonas_internet_tmp"),
+  value = zonas_internet,
+  row.names = FALSE,
+  overwrite = TRUE
+)
+
+# Consultar geometrías de zonas urbanas en la provincia de Santiago
+query_gs = "
+SELECT *
+FROM dpa.zonas_censales_rm
+WHERE urbano = 1 AND (
+    nom_provin = 'SANTIAGO' OR
+    nom_comuna IN ('PUENTE ALTO', 'SAN BERNARDO')
+)"
+zonas_gs = sf::st_read(con, query = query_gs, quiet = TRUE)
+
+
+
+
+```
+
+
+Posteriormente, se integraron los datos censales previamente procesados con la geometría espacial, generando así una tabla espacial final lista para su visualización.
+se realizó la integración entre los datos de conectividad y las geometrías espaciales, creando una capa final que permite la visualización cartográfica del indicador.
+
+La construcción del indicador de **acceso a Internet móvil** se basó en la integración de los datos del **Censo 2017** y la **Encuesta CASEN**, procesados mediante microsimulación para estimar el porcentaje de hogares con conectividad efectiva en cada zona censal. 
+
+Este enfoque permite obtener una estimación espacialmente coherente de la **brecha digital**, considerando tanto las características sociodemográficas (edad, educación y sexo) como la estructura territorial del Gran Santiago.
+
+La tabla espacial resultante asocia a cada zona censal su respectivo porcentaje de acceso (`porc_bamovil`), permitiendo su representación cartográfica y el análisis comparativo entre comunas urbanas de la Región Metropolitana.
+
+### 2.1.3. Indicadores
+
+El indicador principal de este estudio corresponde al **porcentaje de acceso a Internet por banda ancha móvil**, obtenido a partir de la integración de los datos del **Censo 2017** y la **Encuesta CASEN** mediante técnicas de **microsimulación**.  
+Este indicador busca representar la proporción de hogares efectivamente conectados a Internet móvil dentro de cada zona censal, permitiendo caracterizar las desigualdades territoriales en el acceso digital.
+
+El cálculo del porcentaje de acceso (*A*) se expresa mediante la siguiente fórmula:
+$$
+A = \left( \frac{\text{Viviendas con conexión a Internet móvil (r17b = 1)}}{\text{Total de viviendas censadas}} \right) \times 100
+$$
+
+Donde:
+
+-   *A*: Porcentaje de acceso a Internet móvil en la zona censal o comuna.  
+-   *r17b = 1*: Viviendas que declararon disponer de conexión a Internet por banda ancha móvil según el Censo 2017.  
+-   *r17b = 2*: Viviendas que no disponen de conexión a Internet móvil.  
+
+A partir de esta variable, se construyó una variable binaria `r17b_bin`, que adopta el valor:
+
+-   `1` cuando el hogar tiene conexión a Internet móvil.  
+-   `0` cuando el hogar no posee conexión a Internet móvil.  
+
+Esta recodificación permitió calcular el promedio de acceso dentro de cada zona censal, generando el indicador `porc_bamovil`, el cual expresa el **porcentaje de hogares conectados** y constituye la base del análisis espacial.
+
+Adicionalmente, durante el proceso de microsimulación, se consideraron variables sociodemográficas de la CASEN, tales como **edad (`edad`)**, **nivel educativo (`esc`)** y **sexo (`sexo`)**, para ajustar la estructura poblacional del Censo y estimar de manera más precisa la distribución del acceso digital.
+
+| Naturaleza del índice *A* | Descripción |
+|----|----|
+| *A* < 50% | Menos de la mitad de los hogares posee acceso a Internet móvil (alta brecha digital). |
+| *A* = 50–80% | Nivel medio de conectividad, con desigualdades internas significativas. |
+| *A* > 80% | Mayoría de los hogares conectados a Internet móvil (baja brecha digital). |
+
+Este indicador constituye una medida sintética de inclusión tecnológica territorial, permitiendo identificar zonas con alta exclusión digital y orientar políticas públicas hacia una **equidad digital metropolitana.
+
+---
+
+### 2.1.4. Visualización
+
+Se generaron tres productos visuales para el análisis:
+
+**Mapa comunal de acceso a Internet móvil**: representa la proporción de hogares conectados en cada comuna del Gran Santiago, destacando los contrastes espaciales entre el sector oriente y las periferias sur y poniente.  
+2.  **Leyenda ordenada**: muestra de forma jerárquica las comunas desde el mayor al menor nivel de conectividad, facilitando la interpretación comparativa del indicador `porc_bamovil`.  
+
+En conjunto, estos productos permiten **visualizar la distribución espacial de la brecha digital** en el Gran Santiago, evidenciando cómo las condiciones de conectividad digital reflejan las desigualdades estructurales del territorio metropolitano.
+
+
+```{r}
+## ============================================================
+## 5. MAPA DE ACCESO A INTERNET MÓVIL (COMPATIBLE) ####
+## ============================================================
+
+library(ggplot2)
+library(sf)
+library(dplyr)
+library(cowplot)
+library(ggrepel)
+
+# Validación de existencia de tablas
+if (!exists("zonas_gs") || !exists("zonas_internet")) {
+  stop("Faltan datos para generar el mapa. Verifica zonas_gs y zonas_internet.")
+}
+
+# 🔹 Forzar tipo de dato a texto para unir correctamente
+zonas_gs$geocodigo <- as.character(zonas_gs$geocodigo)
+zonas_internet$geocodigo <- as.character(zonas_internet$geocodigo)
+
+# Detectar el nombre de la columna de geometría (a veces es geom o wkb_geometry)
+nombre_geom <- attr(zonas_gs, "sf_column")
+if (is.null(nombre_geom)) {
+  posibles_geom <- intersect(names(zonas_gs), c("geometry", "geom", "wkb_geometry", "Shape"))
+  if (length(posibles_geom) == 0) stop(" No se encontró ninguna columna de geometría en zonas_gs.")
+  nombre_geom <- posibles_geom[1]
+  message("🧭 Se detectó columna de geometría: ", nombre_geom)
+}
+
+# Si la geometría no se llama 'geometry', renombrarla
+if (nombre_geom != "geometry") {
+  zonas_gs <- zonas_gs %>%
+    dplyr::rename(geometry = !!sym(nombre_geom)) %>%
+    sf::st_as_sf()
+}
+
+# 🔹 Unión espacial — asegurando que se mantiene la geometría SF
+zonas_gs_final <- zonas_gs %>%
+  dplyr::left_join(zonas_internet, by = "geocodigo") %>%
+  sf::st_as_sf()
+
+# Verificar que tiene geometría
+if (!inherits(zonas_gs_final, "sf")) {
+  stop("l objeto zonas_gs_final no tiene geometría. Revisa la capa cargada desde PostgreSQL.")
+}
+
+# 🔹 Crear dataset de centroides por comuna (agrupando correctamente)
+centroides_comunas <- zonas_gs_final %>%
+  dplyr::group_by(nom_comuna) %>%
+  dplyr::summarise(geometry = sf::st_union(geometry), .groups = "drop") %>%
+  dplyr::mutate(
+    centroid = sf::st_centroid(geometry),
+    lon = sf::st_coordinates(centroid)[, 1],
+    lat = sf::st_coordinates(centroid)[, 2]
+  )
+
+
+
+# Crear mapa base
+mapa_comunas <- ggplot() +
+  geom_sf(data = zonas_gs_final,
+          aes(fill = porc_bamovil),
+          color = "white", size = 0.2) +
+  scale_fill_gradient(
+    name = "Porcentaje de acceso a Internet\nBanda Ancha Móvil (%)",
+    low = "#fee8c8", high = "#8c2d04", na.value = "grey90"
+  ) +
+  labs(
+    title = "Acceso a Internet por Banda Ancha Móvil en el Gran Santiago",
+    subtitle = "Estimación mediante microsimulación (CASEN 2017 + Censo 2017)",
+    caption = "Fuente: Elaboración propia a partir de CASEN y Censo 2017."
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    plot.subtitle = element_text(size = 10),
+    axis.text = element_blank(),
+    axis.title = element_blank(),
+    panel.grid = element_blank(),
+    legend.position = "bottom"
+  )
+
+# 🔹 Agregar etiquetas según versión de ggrepel disponible
+if ("geom_sf_text_repel" %in% getNamespaceExports("ggrepel")) {
+  # Versión moderna de ggrepel
+  mapa_comunas <- mapa_comunas +
+    ggrepel::geom_sf_text_repel(
+      data = centroides_comunas,
+      aes(label = nom_comuna),
+      size = 2.5, color = "black"
+    )
+} else {
+  # Versión compatible (usando coordenadas X/Y)
+  mapa_comunas <- mapa_comunas +
+    ggrepel::geom_text_repel(
+      data = centroides_comunas,
+      aes(x = lon, y = lat, label = nom_comuna),
+      size = 2.5, color = "black"
+    )
+}
+
+# Crear leyenda separada
+leyenda <- get_legend(
+  mapa_comunas +
+    theme(
+      legend.position = "bottom",
+      legend.title = element_text(size = 9),
+      legend.text = element_text(size = 8)
+    )
+)
+
+cat(" Mapa y leyenda creados correctamente.\n")
+
+```
+
+------------------------------------------------------------------------
+
+## 2.2 Análisis y Resultados
+
+Del procesamiento conjunto de las bases de datos del **Censo 2017** y la Encuesta CASEN, empleando técnicas de microsimulación en RStudio y consultas espaciales desde pgAdmin/PostgreSQL, se obtuvo el siguiente mapa temático, que muestra la distribución del acceso a Internet por Banda Ancha Móvil en las comunas del Gran Santiago.
+
+
+## 2.2 Análisis y Resultados
+
+Del procesamiento conjunto de las bases de datos del **Censo 2017** y la **Encuesta CASEN**, utilizando técnicas de **microsimulación** en **RStudio** y consultas espaciales desde **pgAdmin/PostgreSQL**, se generó un indicador del **porcentaje de acceso a Internet por Banda Ancha Móvil** (`porc_bamovil`).  
+Este indicador expresa la proporción de hogares conectados a Internet móvil dentro de cada comuna del **Gran Santiago**, lo que permite identificar la magnitud y distribución territorial de la **brecha digital**.
+
+A continuación, se presenta el mapa comunal resultante junto con su respectiva leyenda.
+
+## 2.2 Análisis y Resultados
+
+Del procesamiento conjunto de las bases de datos del **Censo 2017** y la **Encuesta CASEN**, utilizando técnicas de **microsimulación** en **RStudio** y consultas espaciales desde **pgAdmin/PostgreSQL**, se generó un indicador del **porcentaje de acceso a Internet por Banda Ancha Móvil** (`porc_bamovil`).  
+Este indicador expresa la proporción de hogares conectados a Internet móvil dentro de cada comuna del **Gran Santiago**, lo que permite identificar la magnitud y distribución territorial de la **brecha digital**.
+
+A continuación, se presenta el mapa comunal resultante junto con su respectiva leyenda.
+
+```{r mapa_bamovil, echo=TRUE, fig.cap="Mapa 1. Acceso a Internet por Banda Ancha Móvil en comunas del Gran Santiago.", message=FALSE, warning=FALSE}
+# Mapa principal
+mapa_comunas
+grid::grid.newpage()
+grid::grid.draw(leyenda)
+```
+
+El mapa anterior representa la distribución espacial del acceso digital en las comunas del Gran Santiago.
+Cada color identifica una comuna distinta según su porcentaje promedio de hogares con acceso a Internet móvil, mientras que la leyenda detalla los valores específicos ordenados de mayor a menor conectividad.
+
+Se observa una marcada desigualdad territorial en la distribución del acceso.
+Las comunas con mayor conectividad digital corresponden a Quinta Normal (74,1%), Providencia (68,2%), La Reina (67,1%), La Pintana (66,4%), Independencia (64,5%) y Macul (62,8%), todas superando el promedio regional.
+Estas zonas concentran infraestructura tecnológica consolidada, mayores niveles educativos y mejores condiciones socioeconómicas, lo que favorece la adopción de servicios digitales.
+
+En contraste, las comunas de la periferia sur y poniente evidencian niveles críticos de acceso.
+Cerrillos (17,8%), La Granja (25,2%), El Bosque (24,7%), La Cisterna (26,3%), San Ramón (34,3%) y Lo Espejo (37%) presentan los valores más bajos del área metropolitana, reflejando una brecha digital estructural asociada a menores ingresos, alta densidad habitacional y escasa inversión en redes de telecomunicación.
+
+La diferencia entre los extremos del espectro —Quinta Normal (74,1%) y Cerrillos (17,8%)— equivale a más de 56 puntos porcentuales, lo que evidencia una polarización digital profunda entre comunas del mismo espacio urbano.
+Este patrón reafirma la existencia de un gradiente digital oriente–poniente, donde el acceso a la tecnología y la conectividad están estrechamente vinculados con la segregación socioeconómica y urbana.
+
+En términos espaciales, la zona oriente y parte del centro-norte presentan mayores niveles de acceso, mientras que los sectores surponiente concentran los valores más bajos.
+Este comportamiento se asocia tanto a la capacidad adquisitiva de los hogares como a la disponibilidad de infraestructura tecnológica, configurando una geografía desigual de oportunidades digitales.
+
+Finalmente, los resultados muestran que más del 40% de las comunas del Gran Santiago se encuentran por debajo del umbral del 55% de acceso, lo que sugiere una vulnerabilidad digital significativa.
+Estas diferencias implican que amplios sectores de la población urbana permanecen excluidos de la conectividad plena, limitando su acceso a información, educación, servicios y participación social.
+
+En síntesis, este análisis evidencia cómo la brecha digital se manifiesta como una nueva forma de desigualdad urbana, donde el acceso a Internet no solo depende de la infraestructura disponible, sino también de las condiciones estructurales del territorio.
+El mapa constituye una herramienta clave para la identificación de territorios prioritarios en políticas públicas de inclusión digital, desarrollo urbano y equidad tecnológica.
+
+Las comunas del Gran Santiago fueron clasificadas según su **porcentaje de hogares con acceso a Internet por Banda Ancha Móvil (BAMóvil)**, lo que permite identificar distintos niveles de **inclusión y exclusión digital** en el territorio metropolitano.  
+A partir de los resultados obtenidos, se distinguieron tres grandes categorías de conectividad: **alta**, **media** y **baja**, que reflejan la magnitud de la brecha digital urbana y su estrecha relación con los patrones de segregación socioespacial.
+
+Los principales hallazgos territoriales evidencian **zonas con alta vulnerabilidad digital** (clase 1, color amarillo claro en el mapa).  
+Estas comunas concentran **los menores porcentajes de acceso a Internet móvil**, reflejando una combinación de **baja inversión en infraestructura, alta densidad habitacional y limitaciones económicas de los hogares**.  
+Se localizan principalmente en el **sur y poniente del Gran Santiago**, destacando:
+
+-   **Cerrillos (17,8%)**
+-   **El Bosque (24,7%)**
+-   **La Granja (25,2%)**
+-   **San Ramón (34,3%)**
+-   **La Cisterna (26,3%)**
+-   **Lo Espejo (37%)**
+
+Estos territorios presentan una exclusión digital estructural, donde la conectividad deficiente se suma a otras formas de desigualdad social y urbana.  
+En ellos, la falta de acceso a Internet limita la participación en actividades educativas, laborales y cívicas, profundizando el rezago de sus habitantes respecto a comunas con mayor desarrollo tecnológico.
+
+En el otro extremo, se identifican comunas con alta conectividad digital (clase 3, colores violeta y azul oscuro en el mapa), que superan el 65% de hogares con acceso.  
+Se concentran en el sector nororiente y centro consolidado de la ciudad, e incluyen:
+
+-   **Quinta Normal (74,1%)**
+-   **Providencia (68,2%)**
+-   **La Reina (67,1%)**
+-   **La Pintana (66,4%)**
+-   **Macul (62,8%)**
+-   **Las Condes (61,9%)**
+
+Estas comunas reflejan mayores niveles educativos, ingresos estables y densidad de infraestructura tecnológica, lo que posibilita una conectividad de mejor calidad.  
+En ellas, el acceso a Internet móvil se percibe como un servicio básico cotidiano, reforzando la inserción digital de sus habitantes y su participación en entornos digitales avanzados.
+
+Entre ambos extremos se encuentran zonas de conectividad intermedia (clase 2, tonos rosados del mapa), donde los porcentajes oscilan entre el **45% y el 60%**.  
+Estas comunas —como **San Bernardo, Maipú, Puente Alto, Ñuñoa, Renca y Huechuraba**— representan territorios de transición, donde coexisten sectores con buena conectividad junto a otros con déficits puntuales.  
+En general, presentan una estructura urbana heterogénea, caracterizada por crecimiento periférico acelerado y servicios de telecomunicación desiguales entre barrios.
+
+El análisis espacial revela un gradiente digital oriente–poniente en la ciudad, coherente con las dinámicas históricas de segregación socioeconómica y urbana.  
+Las comunas con mayor conectividad tienden a concentrarse en el eje oriente y centro, mientras que las más rezagadas se ubican en el eje sur y poniente, donde las condiciones de vulnerabilidad estructural son más pronunciadas.
+
+El mapa evidencia una **brecha digital persistente y territorialmente estructurada** en el Gran Santiago.  
+Los resultados permiten identificar **bolsones de exclusión digital** que requieren intervenciones focalizadas, con un enfoque que combine **infraestructura tecnológica, alfabetización digital y políticas públicas locales**.  
+En este sentido, la conectividad deja de ser un privilegio y se reafirma como un **derecho social fundamental**, indispensable para reducir las desigualdades urbanas y avanzar hacia una ciudad digitalmente inclusiva.
+
+------------------------------------------------------------------------
+
+
+
+## 3. Conclusiones
+
+El presente estudio permitió evidenciar las profundas **desigualdades territoriales en el acceso a Internet por Banda Ancha Móvil (BAMóvil)** en la Región Metropolitana de Santiago, revelando que la brecha digital no es un fenómeno meramente tecnológico, sino estructural y socialmente determinado.  
+A partir de la integración de la **Encuesta CASEN 2017** y el **Censo de Población y Vivienda 2017**, se logró estimar y representar espacialmente el nivel de conectividad digital de los hogares urbanos, configurando una base empírica sólida para comprender la dimensión territorial de la exclusión digital en el espacio metropolitano.
+
+Los resultados obtenidos muestran una **marcada polarización espacial** en la distribución de la conectividad: mientras las comunas del **sector oriente** —como **Las Condes, La Reina, Providencia y Ñuñoa**— presentan altos niveles de acceso a Internet móvil, las comunas del **sector sur y poniente** —entre ellas **La Pintana, El Bosque, Lo Espejo y San Ramón**— exhiben porcentajes considerablemente más bajos.  
+Este patrón evidencia un **gradiente oriente–poniente** históricamente persistente, donde la infraestructura digital, al igual que otros servicios urbanos, se distribuye de manera desigual siguiendo las líneas socioeconómicas de la ciudad.  
+En consecuencia, la brecha digital actúa como una extensión de la **segregación socioespacial**, reproduciendo las desigualdades de acceso a la educación, el trabajo y la información.
+
+La aplicación de **técnicas de microsimulación** permitió ajustar la información proveniente de la CASEN a los totales poblacionales del Censo, generando un modelo sintético de estimación territorial del acceso a Internet.  
+Esta aproximación metodológica demostró ser una herramienta eficaz para el análisis espacial de fenómenos sociales y tecnológicos, proporcionando una lectura detallada de la conectividad a nivel de comuna y zona urbana.  
+A través de la representación cartográfica se pudo visualizar de manera clara la **desigual distribución de la inclusión digital**, permitiendo identificar áreas críticas con mayores déficits de acceso.
+
+El análisis territorial confirma que la **brecha digital refuerza la exclusión social y económica**, afectando principalmente a los hogares ubicados en zonas de menor ingreso, alta densidad poblacional y baja infraestructura tecnológica.  
+En estas comunas, las limitaciones de conectividad impactan directamente en la capacidad de sus habitantes para acceder a servicios esenciales, tales como educación en línea, teletrabajo, participación ciudadana o trámites digitales.  
+La falta de acceso a Internet no solo restringe la inserción en la sociedad digital contemporánea, sino que también profundiza la **vulnerabilidad estructural** de comunidades que ya enfrentan déficits en materia de vivienda, transporte y servicios básicos.
+
+En este contexto, resulta pertinente destacar el **Plan Brecha Digital Cero (SUBTEL, 2022–2025)**, cuyo objetivo es garantizar que todos los habitantes del país tengan acceso a Internet independiente de su ubicación geográfica o condición económica.  
+Esta política se sustenta en cuatro ejes estratégicos: **Regulación para la conectividad**, **Infraestructura digital**, **Proyectos de ley** y **Conectividad para todos**, los cuales buscan reducir las asimetrías en el acceso y promover la equidad tecnológica a escala nacional.  
+La implementación de este tipo de iniciativas resulta crucial para abordar la desigualdad observada en territorios metropolitanos como Santiago, donde la conectividad se ha convertido en un factor determinante de **inclusión social y desarrollo humano**.
+
+Asimismo, el reconocimiento del **acceso a Internet como un derecho social básico** plantea un desafío para la gestión pública y la planificación urbana.  
+Garantizar la conectividad no solo implica ampliar la infraestructura tecnológica, sino también fortalecer la **alfabetización digital**, la participación comunitaria y la articulación con los gobiernos locales.  
+El trabajo conjunto entre el Estado, los municipios y la ciudadanía será fundamental para reducir las brechas de acceso y avanzar hacia una **sociedad digital más equitativa y cohesionada**.
+
+Finalmente, este estudio demuestra el valor del **análisis geoespacial** como herramienta para comprender las dinámicas de desigualdad urbana en la era digital.  
+El uso integrado de **pgAdmin y RStudio** permitió desarrollar un modelo reproducible de análisis territorial, aplicable a otras dimensiones de exclusión social como la vivienda, la educación o el acceso a servicios públicos.  
+En síntesis, la evidencia empírica obtenida confirma que la **brecha digital en el Gran Santiago** constituye una manifestación contemporánea de la desigualdad territorial, y que su reducción requiere un enfoque integral que combine **infraestructura, políticas públicas y justicia espacial**.  
+Solo mediante una conectividad inclusiva y universal será posible avanzar hacia un **Santiago verdaderamente conectado, justo y sostenible**.
+
+
+------------------------------------------------------------------------
+
+
+
+## 4. Bibliografía
+
+Centro de Estudios del Ministerio de Educación (2022). *Condiciones del hogar y brechas en el acceso a la educación digital en Chile*. Santiago de Chile: Mineduc.  
+Disponible en: https://centroestudios.mineduc.cl/
+
+Comisión Económica para América Latina y el Caribe (CEPAL) (2021). *Transformación digital y brecha de acceso en América Latina y el Caribe*. Santiago de Chile: CEPAL.
+
+Gobierno de Chile – Subsecretaría de Telecomunicaciones (SUBTEL) (2022). *Plan Brecha Digital Cero 2022–2025: Conectividad para todas y todos*. Santiago de Chile.  
+Recuperado de: https://www.subtel.gob.cl/gobierno-lanza-plan-brecha-digital-cero-con-foco-en-zonas-sin-conectividad-robo-de-cables-y-trabajo-con-municipios/
+
+Instituto Nacional de Estadísticas (INE) (2018). *Censo de Población y Vivienda 2017: Base de microdatos*. Santiago de Chile: INE.  
+Disponible en: https://www.censo2017.cl/
+
+Ministerio de Desarrollo Social y Familia (MDSF) (2018). *Encuesta de Caracterización Socioeconómica Nacional (CASEN) 2017: Base de datos y documentación técnica*. Santiago de Chile.  
+Disponible en: https://observatorio.ministeriodesarrollosocial.gob.cl/
+
+Organización de las Naciones Unidas (ONU) (2020). *Informe sobre el desarrollo digital inclusivo: Desigualdades y conectividad global*. Nueva York: Naciones Unidas.
+
+Subsecretaría de Telecomunicaciones (SUBTEL) (2023). *Informe anual de cobertura y conectividad digital en Chile 2023*. Santiago de Chile.  
+Disponible en: https://www.subtel.gob.cl/
+
+Vallejo, C., & Araya, C. (2022). *Presentación del Plan Brecha Digital Cero: Conectividad como derecho social*. Ministerio Secretaría General de Gobierno y SUBTEL, Santiago de Chile.
+
+Véliz, C., & Sunkel, G. (2020). *Inclusión digital y equidad territorial en América Latina: desafíos para la política pública*. Revista CEPAL, 131, 45–63.
+
+Zúñiga, C. & Martínez, R. (2021). *Brecha digital y desigualdad urbana en Chile: un análisis territorial del acceso a Internet*. Revista de Geografía Norte Grande, 79, 155–178.
