@@ -29,61 +29,63 @@ Para ello se combinan tres variables:
 
 -   **Variable microsimulada** (Trabajo 2):
 
-    -    `porc_bamovil`: porcentaje de hogares con acceso a Internet por banda ancha móvil (BAMóvil) por zona censal.
+    -   `porc_bamovil`: porcentaje de hogares con acceso a Internet por banda ancha móvil (BAMóvil) por zona censal.
 
--    **Variables censales (Censo 2017)**:
+-   **Variables censales (Censo 2017)**:
 
-    -    `ptje_migrantes`: porcentaje de población migrante por zona censal.
+```         
+-    `ptje_migrantes`: porcentaje de población migrante por zona censal.
 
-    -    `ptje_esc_mayor_16`: porcentaje de población con 16 o más años de escolaridad por zona censal.
+-    `ptje_esc_mayor_16`: porcentaje de población con 16 o más años de escolaridad por zona censal.
+
+Estas tres variables permiten explorar cómo se combinan la inclusión digital, la movilidad migratoria y el capital educativo en el espacio urbano del Gran Santiago.
+
+## 2.2. Construcción de indicadores censales
+
+A partir de las tablas normalizadas del Censo 2017 en PostgreSQL se calculan dos indicadores a nivel de zona censal:
+
+-   `ptje_migrantes`: porcentaje de personas que declaran haber nacido fuera de Chile.
+
+<!-- -->
+
+-    `ptje_esc_mayor_16`: porcentaje de personas con escolaridad ≥ 16 años.
 
     Estas tres variables permiten explorar cómo se combinan la inclusión digital, la movilidad migratoria y el capital educativo en el espacio urbano del Gran Santiago.
 
-    ## 2.2. Construcción de indicadores censales
+    ## 1.1. Objetivo general
 
-    A partir de las tablas normalizadas del Censo 2017 en PostgreSQL se calculan dos indicadores a nivel de zona censal:
+    Identificar y caracterizar clusters socio-digitales en las zonas censales urbanas del Gran Santiago a partir de la combinación de:
 
-    -   `ptje_migrantes`: porcentaje de personas que declaran haber nacido fuera de Chile.
+-   Acceso a Internet por banda ancha móvil (`porc_bamovil`),
 
-    <!-- -->
+-    Porcentaje de población migrante (`ptje_migrantes`),
 
-    -    `ptje_esc_mayor_16`: porcentaje de personas con escolaridad ≥ 16 años.
+-    Porcentaje de población con alta escolaridad (`ptje_esc_mayor_16`),
 
-        Estas tres variables permiten explorar cómo se combinan la inclusión digital, la movilidad migratoria y el capital educativo en el espacio urbano del Gran Santiago.
+    Mediante técnicas de análisis de conglomerados (k-means) y medidas de diversidad (índice de Shannon).
 
-        ## 1.1. Objetivo general
+    ## 1.2. Pregunta e hipótesis de trabajo
 
-        Identificar y caracterizar clusters socio-digitales en las zonas censales urbanas del Gran Santiago a partir de la combinación de:
+    **Pregunta central:**
 
-    -   Acceso a Internet por banda ancha móvil (`porc_bamovil`),
+    > ¿Existen patrones territoriales diferenciados de brecha digital en el Gran Santiago, asociados a la combinación de migración y nivel educativo de la población?
 
-    -    Porcentaje de población migrante (`ptje_migrantes`),
+    **Hipótesis de trabajo:**
 
-    -    Porcentaje de población con alta escolaridad (`ptje_esc_mayor_16`),
+    > 
+    >
+    > Zonas con mayor escolaridad tienden a presentar mayor acceso a Internet móvil, mientras que aquellas con baja escolaridad y alta vulnerabilidad socioespacial concentran mayores niveles de brecha digital, configurando clusters territoriales diferenciados.
 
-        Mediante técnicas de análisis de conglomerados (k-means) y medidas de diversidad (índice de Shannon).
+    # 2. Datos y metodología
 
-        ## 1.2. Pregunta e hipótesis de trabajo
+    ## 2.1. Librerías y entrada de datos
 
-        **Pregunta central:**
+    Primero se cargan las librerías y se incorporan las entradas principales:
 
-        > ¿Existen patrones territoriales diferenciados de brecha digital en el Gran Santiago, asociados a la combinación de migración y nivel educativo de la población?
+    -    Capa de zonas censales urbanas con la brecha digital microsimulada (`zonas_gs_bamovil.geojson`) exportada en el Trabajo 2.
 
-        **Hipótesis de trabajo:**
-
-        > 
-        >
-        > Zonas con mayor escolaridad tienden a presentar mayor acceso a Internet móvil, mientras que aquellas con baja escolaridad y alta vulnerabilidad socioespacial concentran mayores niveles de brecha digital, configurando clusters territoriales diferenciados.
-
-        # 2. Datos y metodología
-
-        ## 2.1. Librerías y entrada de datos
-
-        Primero se cargan las librerías y se incorporan las entradas principales:
-
-        -    Capa de zonas censales urbanas con la brecha digital microsimulada (`zonas_gs_bamovil.geojson`) exportada en el Trabajo 2.
-
-        -    Conexión a la base PostgreSQL/PostGIS con las tablas del Censo 2017 para la Región Metropolitana.
+    -    Conexión a la base PostgreSQL/PostGIS con las tablas del Censo 2017 para la Región Metropolitana.
+```
 
 ```{r echo=TRUE, message=FALSE, warning=FALSE}
 ## 1. LIBRERÍAS
@@ -140,7 +142,7 @@ A partir de las tablas normalizadas del Censo 2017 en PostgreSQL se calculan dos
 
 <!-- -->
 
--    `ptje_esc_mayor_16`: porcentaje de personas con escolaridad ≥ 16 años.
+-   `ptje_esc_mayor_16`: porcentaje de personas con escolaridad ≥ 16 años.
 
 ```{r echo=TRUE, message=FALSE, warning=FALSE}
 ## 4. CONSULTA SQL: INDICADORES SOCIODEMOGRÁFICOS
@@ -235,7 +237,7 @@ En esta etapa quedan claramente definidas:
 
 -   **Variable microsimulada:** `porc_bamovil` (brecha digital / acceso BAMóvil).
 
--    **Variables de Censo:** `ptje_migrantes` (migración) y `ptje_esc_mayor_16` (escolaridad alta).
+-   **Variables de Censo:** `ptje_migrantes` (migración) y `ptje_esc_mayor_16` (escolaridad alta).
 
 ## 2.4. Preparación de variables para clustering
 
@@ -280,7 +282,7 @@ y = "Suma de cuadrados intra-cluster (WSS)"
 
 En este trabajo se adopta **k = 4**, ya que:
 
--    El gráfico del codo muestra una disminución marcada del WSS hasta aproximadamente 4 clusters, y el uso de 4 grupos permite una interpretación más rica de los perfiles socio-digitales, diferenciando mejor entre zonas con brecha digital alta, media y baja, combinadas con distintos niveles de migración y escolaridad.
+-   El gráfico del codo muestra una disminución marcada del WSS hasta aproximadamente 4 clusters, y el uso de 4 grupos permite una interpretación más rica de los perfiles socio-digitales, diferenciando mejor entre zonas con brecha digital alta, media y baja, combinadas con distintos niveles de migración y escolaridad.
 
 ## 3.2. Clasificación k-means con k = 4
 
@@ -316,11 +318,11 @@ Cada fila de `resumen_clusters` resume el perfil promedio de las zonas en cada c
 
 A partir de esta tabla se pueden identificar, por ejemplo:
 
--    Clusters con alta conectividad y alta escolaridad
+-   Clusters con alta conectividad y alta escolaridad
 
--    Clusters con baja conectividad y baja escolaridad
+-   Clusters con baja conectividad y baja escolaridad
 
--    Clusters con alta presencia migrante y niveles intermedios de acceso, etc.
+-   Clusters con alta presencia migrante y niveles intermedios de acceso, etc.
 
 -   La interpretación específica depende de los valores que arroje la ejecución del código.
 
@@ -442,7 +444,7 @@ mapa_clusters
 
 Este mapa permite identificar:
 
--    Zonas donde se concentra el cluster de mayor acceso digital y mayor escolaridad.
+-   Zonas donde se concentra el cluster de mayor acceso digital y mayor escolaridad.
 
 -   Zonas con brecha digital elevada y menor escolaridad.
 
@@ -456,37 +458,37 @@ Para evaluar la diversidad interna de clusters dentro de cada comuna se utiliza 
 
 -   Valores **altos de H**: la comuna contiene una mezcla relativamente balanceada de distintos clusters (alta heterogeneidad interna).
 
--    Valores **bajos de H**: la comuna está dominada por uno o pocos clusters (mayor homogeneidad interna).
+-   Valores **bajos de H**: la comuna está dominada por uno o pocos clusters (mayor homogeneidad interna).
 
-    ```{r echo=TRUE, message=FALSE, warning=FALSE}
-    ## 11. ÍNDICE DE SHANNON POR COMUNA
+```{{r echo=TRUE, message=FALSE, warning=FALSE}}
+## 11. ÍNDICE DE SHANNON POR COMUNA
 
-    shannon_index <- function(p) {
-    p <- p[p > 0 & !is.na(p)]
-    -sum(p * log(p))
-    }
+shannon_index <- function(p) {
+p <- p[p > 0 & !is.na(p)]
+-sum(p * log(p))
+}
 
-    # Tabla de proporciones por comuna y cluster
+# Tabla de proporciones por comuna y cluster
 
-    tabla_clusters <- zonas_gs_indicadores %>%
-    st_drop_geometry() %>%
-    group_by(nom_comuna, cluster) %>%
-    summarise(n = n(), .groups = "drop_last") %>%
-    mutate(prop = n / sum(n))
+tabla_clusters <- zonas_gs_indicadores %>%
+st_drop_geometry() %>%
+group_by(nom_comuna, cluster) %>%
+summarise(n = n(), .groups = "drop_last") %>%
+mutate(prop = n / sum(n))
 
-    # Cálculo de H por comuna
+# Cálculo de H por comuna
 
-    shannon_comunas <- tabla_clusters %>%
-    summarise(H = shannon_index(prop)) %>%
-    ungroup()
+shannon_comunas <- tabla_clusters %>%
+summarise(H = shannon_index(prop)) %>%
+ungroup()
 
-    # Revisión rápida
+# Revisión rápida
 
-    shannon_comunas %>%
-    arrange(desc(H)) %>%
-    head()
+shannon_comunas %>%
+arrange(desc(H)) %>%
+head()
 
-    ```
+```
 
 ## 5.2. Mapa del índice de Shannon
 
@@ -553,22 +555,22 @@ En términos territoriales, el mapa de clusters y el mapa del índice de Shannon
 
 -   Reconocer zonas homogéneas con alta o baja conectividad digital.
 
--    Localizar comunas donde conviven múltiples perfiles socio-digitales, lo que plantea desafíos adicionales para la focalización de políticas públicas.
+-   Localizar comunas donde conviven múltiples perfiles socio-digitales, lo que plantea desafíos adicionales para la focalización de políticas públicas.
 
 El trabajo permitió profundizar el análisis de la brecha digital en el Gran Santiago incorporando, sobre la variable microsimulada de acceso a banda ancha móvil (porc_bamovil), dos dimensiones sociodemográficas claves del Censo 2017: porcentaje de migrantes y porcentaje de población con 16 años o más de escolaridad.
 Mediante la aplicación de k-means y el método del codo se optó por **k = 4 clusters**, lo que ofrece un buen compromiso entre capacidad explicativa y simplicidad interpretativa.
 
 Los resultados del clustering muestran **cuatro perfiles territoriales diferenciados de “territorios socio-digitales”**:
 
--    Un **Cluster 1** caracterizado por **baja escolaridad y bajo–medio acceso a BAMóvil**, con baja presencia migrante.
+-   Un **Cluster 1** caracterizado por **baja escolaridad y bajo–medio acceso a BAMóvil**, con baja presencia migrante.
     Se asocia principalmente a zonas periféricas del sur y poniente, donde la brecha digital refuerza condiciones de vulnerabilidad social históricas.
 
 -   Un **Cluster 2** con **alta escolaridad y alto porcentaje de hogares con acceso a Internet móvil**, y niveles de migración más bien moderados.
     Corresponde a zonas del eje oriente y centro consolidado, donde se concentran mayores recursos, capital humano y mejor infraestructura de telecomunicaciones.
 
--    Un **Cluster 3** de **escolaridad media o baja y acceso digital intermedio**, con baja migración, que representa sectores de transición: periferias consolidadas que han mejorado su conectividad, pero mantienen rezagos educativos.
+-   Un **Cluster 3** de **escolaridad media o baja y acceso digital intermedio**, con baja migración, que representa sectores de transición: periferias consolidadas que han mejorado su conectividad, pero mantienen rezagos educativos.
 
--    Un **Cluster 4** con **alta presencia migrante, niveles diversos de escolaridad y acceso digital medio a medio-alto**, que se localiza en comunas centrales y del norte de la ciudad.
+-   Un **Cluster 4** con **alta presencia migrante, niveles diversos de escolaridad y acceso digital medio a medio-alto**, que se localiza en comunas centrales y del norte de la ciudad.
     Estas zonas funcionan como “puertas de entrada” para población migrante, donde la conectividad aparece como un recurso relevante para la inserción urbana, aunque no necesariamente acompañado de altos niveles de capital educativo.
 
 -   Los gráficos de dispersión y la matriz de pares confirman que **la escolaridad y el acceso a Internet móvil tienden a estar positivamente asociados**, mientras que la relación entre migración y brecha digital es más compleja: existen zonas con fuerte presencia migrante tanto en contextos de alta como de media conectividad.
