@@ -498,43 +498,53 @@ Se agrega el índice de Shannon a una geometría comunal obtenida a partir de la
 ## 12. MAPA DEL ÍNDICE DE SHANNON
 
 # Geometría comunal derivada de zonas censales
-
 comunas_geom <- zonas_gs_indicadores %>%
-group_by(nom_comuna) %>%
-summarise(
-geometry = sf::st_union(geometry),
-.groups  = "drop"
-) %>%
-st_as_sf()
+  group_by(nom_comuna) %>%
+  summarise(
+    geometry = sf::st_union(geometry),
+    .groups = "drop"
+  ) %>%
+  st_as_sf()
 
-# Unir índice de Shannon
+## 5. Unir índice de Shannon a la geometría --------------------
 
 comunas_shannon <- comunas_geom %>%
-left_join(shannon_comunas, by = "nom_comuna")
+  left_join(shannon_comunas, by = "nom_comuna")
 
-# Mapa
+## 6. Mapa del índice de Shannon -------------------------------
 
 mapa_shannon <- ggplot(comunas_shannon) +
-geom_sf(aes(fill = H), color = "white", size = 0.3) +
-scale_fill_viridis_c(
-option = "plasma",
-name   = "Índice de Shannon (H)"
-) +
-labs(
-title    = "Diversidad interna de clusters socio-digitales por comuna",
-subtitle = "Índice de Shannon aplicado a los clusters por zona censal",
-caption  = "Fuente: Elaboración propia en base a CASEN 2017 y Censo 2017"
-) +
-theme_minimal() +
-theme(
-plot.title    = element_text(face = "bold", hjust = 0.5),
-plot.subtitle = element_text(hjust = 0.5),
-axis.text     = element_blank(),
-axis.title    = element_blank(),
-panel.grid    = element_blank()
+  geom_sf(aes(fill = H), color = "white", size = 0.3) +
+  scale_fill_viridis_c(
+    option = "plasma",
+    name   = "Índice de Shannon (H)"
+  ) +
+  labs(
+    title    = "Índice de Shannon por comuna",
+    subtitle = "Diversidad interna de clusters socio-digitales\nProvincia de Santiago, Región Metropolitana",
+    caption  = "Fuente: Elaboración propia en base a Censo 2017 y clusters de brecha digital"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title    = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5),
+    axis.text     = element_blank(),
+    axis.title    = element_blank(),
+    panel.grid    = element_blank()
+  )
+
+print(mapa_shannon)
+
+## 7. (Opcional) Exportar capa con el índice de Shannon --------
+
+if (!dir.exists("output")) dir.create("output")
+
+st_write(
+  comunas_shannon,
+  "output/comunas_shannon.geojson",
+  delete_dsn = TRUE
 )
 
-mapa_shannon
 
 ```
 
