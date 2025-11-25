@@ -105,18 +105,12 @@ library(viridis)
 ```
 
 ```{r echo=TRUE, message=FALSE, warning=FALSE}
-## 2. ENTRADA: ZONAS CON BRECHA DIGITAL 
 
-# Capa exportada en el Trabajo 2
-
-# Archivo: output/zonas_gs_bamovil.geojson
 
 zonas_gs_bamovil <- st_read("output/zonas_gs_bamovil.geojson")
 
-# Revisión rápida de estructura
 
-head(zonas_gs_bamovil)
-st_geometry_type(zonas_gs_bamovil)
+
 
 ```
 
