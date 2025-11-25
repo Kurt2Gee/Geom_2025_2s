@@ -495,55 +495,39 @@ head()
 Se agrega el índice de Shannon a una geometría comunal obtenida a partir de las zonas censales.
 
 ```{r echo=TRUE, message=FALSE, warning=FALSE}
-## 12. MAPA DEL ÍNDICE DE SHANNON
+library(dplyr)
+library(sf)
 
-# Geometría comunal derivada de zonas censales
+# Función Shannon
+shannon_index <- function(p) {
+  p <- p[p > 0 & !is.na(p)]
+  -sum(p * log(p))
+}
+
+# Tabla de proporciones por comuna y cluster
+tabla_clusters <- zonas_gs_indicadores %>%
+  st_drop_geometry() %>%
+  group_by(nom_comuna, cluster) %>%
+  summarise(n = n(), .groups = "drop_last") %>%
+  mutate(prop = n / sum(n))
+
+# Cálculo del índice de Shannon por comuna
+shannon_comunas <- tabla_clusters %>%
+  summarise(H = shannon_index(prop)) %>%
+  ungroup()
+
+# Geometría de comunas
 comunas_geom <- zonas_gs_indicadores %>%
   group_by(nom_comuna) %>%
   summarise(
     geometry = sf::st_union(geometry),
-    .groups = "drop"
+    .groups  = "drop"
   ) %>%
   st_as_sf()
 
-## 5. Unir índice de Shannon a la geometría --------------------
-
+# Unión del índice de Shannon
 comunas_shannon <- comunas_geom %>%
   left_join(shannon_comunas, by = "nom_comuna")
-
-## 6. Mapa del índice de Shannon -------------------------------
-
-mapa_shannon <- ggplot(comunas_shannon) +
-  geom_sf(aes(fill = H), color = "white", size = 0.3) +
-  scale_fill_viridis_c(
-    option = "plasma",
-    name   = "Índice de Shannon (H)"
-  ) +
-  labs(
-    title    = "Índice de Shannon por comuna",
-    subtitle = "Diversidad interna de clusters socio-digitales\nProvincia de Santiago, Región Metropolitana",
-    caption  = "Fuente: Elaboración propia en base a Censo 2017 y clusters de brecha digital"
-  ) +
-  theme_minimal() +
-  theme(
-    plot.title    = element_text(face = "bold", hjust = 0.5),
-    plot.subtitle = element_text(hjust = 0.5),
-    axis.text     = element_blank(),
-    axis.title    = element_blank(),
-    panel.grid    = element_blank()
-  )
-
-print(mapa_shannon)
-
-## 7. (Opcional) Exportar capa con el índice de Shannon --------
-
-if (!dir.exists("output")) dir.create("output")
-
-st_write(
-  comunas_shannon,
-  "output/comunas_shannon.geojson",
-  delete_dsn = TRUE
-)
 
 
 ```
@@ -568,32 +552,40 @@ En términos territoriales, el mapa de clusters y el mapa del índice de Shannon
 -   Localizar comunas donde conviven múltiples perfiles socio-digitales, lo que plantea desafíos adicionales para la focalización de políticas públicas.
 
 El trabajo permitió profundizar el análisis de la brecha digital en el Gran Santiago incorporando, sobre la variable microsimulada de acceso a banda ancha móvil (porc_bamovil), dos dimensiones sociodemográficas claves del Censo 2017: porcentaje de migrantes y porcentaje de población con 16 años o más de escolaridad.
-Mediante la aplicación de k-means y el método del codo se optó por **k = 4 clusters**, lo que ofrece un buen compromiso entre capacidad explicativa y simplicidad interpretativa.
+Mediante la aplicación de k-means y el método del codo se optó por k = 4 clusters, lo que ofrece un buen compromiso entre capacidad explicativa y simplicidad interpretativa.
 
-Los resultados del clustering muestran **cuatro perfiles territoriales diferenciados de “territorios socio-digitales”**:
+Los resultados del clustering muestran cuatro perfiles territoriales diferenciados de “territorios socio-digitales”:
 
--   Un **Cluster 1** caracterizado por **baja escolaridad y bajo–medio acceso a BAMóvil**, con baja presencia migrante.
+-   Un Cluster 1 caracterizado por baja escolaridad y bajo–medio acceso a BAMóvil, con baja presencia migrante.
     Se asocia principalmente a zonas periféricas del sur y poniente, donde la brecha digital refuerza condiciones de vulnerabilidad social históricas.
 
--   Un **Cluster 2** con **alta escolaridad y alto porcentaje de hogares con acceso a Internet móvil**, y niveles de migración más bien moderados.
+-   Un Cluster 2 con alta escolaridad y alto porcentaje de hogares con acceso a Internet móvil, y niveles de migración más bien moderados.
     Corresponde a zonas del eje oriente y centro consolidado, donde se concentran mayores recursos, capital humano y mejor infraestructura de telecomunicaciones.
 
--   Un **Cluster 3** de **escolaridad media o baja y acceso digital intermedio**, con baja migración, que representa sectores de transición: periferias consolidadas que han mejorado su conectividad, pero mantienen rezagos educativos.
+-   Un Cluster 3 de escolaridad media o baja y acceso digital intermedio, con baja migración, que representa sectores de transición: periferias consolidadas que han mejorado su conectividad, pero mantienen rezagos educativos.
 
--   Un **Cluster 4** con **alta presencia migrante, niveles diversos de escolaridad y acceso digital medio a medio-alto**, que se localiza en comunas centrales y del norte de la ciudad.
+-   Un Cluster 4 con alta presencia migrante, niveles diversos de escolaridad y acceso digital medio a medio-alto, que se localiza en comunas centrales y del norte de la ciudad.
     Estas zonas funcionan como “puertas de entrada” para población migrante, donde la conectividad aparece como un recurso relevante para la inserción urbana, aunque no necesariamente acompañado de altos niveles de capital educativo.
 
--   Los gráficos de dispersión y la matriz de pares confirman que **la escolaridad y el acceso a Internet móvil tienden a estar positivamente asociados**, mientras que la relación entre migración y brecha digital es más compleja: existen zonas con fuerte presencia migrante tanto en contextos de alta como de media conectividad.
+-   Los gráficos de dispersión y la matriz de pares confirman que la escolaridad y el acceso a Internet móvil tienden a estar positivamente asociados, mientras que la relación entre migración y brecha digital es más compleja: existen zonas con fuerte presencia migrante tanto en contextos de alta como de media conectividad.
     Esto sugiere que la migración, por sí sola, no explica la exclusión digital, sino que interactúa con el nivel educativo y con la estructura socioeconómica de cada territorio.
 
-El **Índice de Shannon por comuna**, calculado a partir de la composición interna de los clusters, muestra una geografía clara de la **diversidad socio-digital**.
-Comunas como Recoleta, Independencia, Ñuñoa o La Reina presentan valores altos de H, indicando una mezcla de zonas con distintos perfiles de acceso, escolaridad y migración dentro de un mismo municipio.
-En contraste, comunas del sur y poniente —como La Pintana, El Bosque, Lo Espejo o La Granja— exhiben valores de Shannon bajos, reflejando una mayor homogeneidad en torno a condiciones de baja escolaridad y menor acceso digital.
-Esta lectura complementa el análisis de la brecha digital: no solo existen diferencias entre comunas, sino también **distintos grados de heterogeneidad interna**, lo que tiene implicancias directas para el diseño de políticas focalizadas a escala barrial o de zona censal.
+El Índice de Shannon por comuna, calculado a partir de la composición interna de los clusters, evidencia una geografía claramente diferenciada de la diversidad socio-digital en el Gran Santiago.
+Comunas como Recoleta, Independencia, Ñuñoa y La Reina presentan valores elevados de H, reflejando la coexistencia de zonas con perfiles diversos en acceso digital, escolaridad y presencia migrante.
+Esta heterogeneidad interna es expresión de dinámicas territoriales complejas, donde conviven áreas consolidadas con otras en transición.
 
-En síntesis, el trabajo demuestra que la brecha digital en el Gran Santiago **no es un fenómeno aislado**, sino que se articula con patrones de escolaridad y migración que refuerzan la segregación socioespacial.
-La combinación de microsimulación, análisis de clusters e índice de Shannon aporta una mirada más fina sobre estos procesos, permitiendo identificar territorios donde la conectividad es un factor de integración (clusters con alto acceso y alta escolaridad) y otros donde se configura como una dimensión adicional de exclusión.
-Futuras líneas de trabajo podrían incorporar variables de ingreso, mercado laboral o género, así como extender el análisis a otras regiones del país, para avanzar hacia una política de **equidad digital** basada en evidencia territorial robusta.
+Por el contrario, comunas del sur y poniente —como La Pintana, El Bosque, Lo Espejo y La Granja— exhiben valores bajos del índice, señal de una homogeneidad interna asociada a desventajas estructurales: menor nivel educativo, menor acceso a BAMóvil y mayor vulnerabilidad residencial y socioeconómica.
+En estos territorios, la exclusión digital no se distribuye de manera dispersa sino que se concentra, formando verdaderos bolsones de rezago tecnológico dentro de la ciudad.
+
+En este contexto, los resultados confirman que la brecha digital no es un fenómeno aislado ni meramente técnico.
+Por el contrario, se articula con patrones de desigualdad socioeconómica ya presentes, reforzando la segregación socioespacial del Gran Santiago.
+La distancia entre comunas de mayor bienestar —Providencia, Ñuñoa, Las Condes, Vitacura— y comunas de menores ingresos —La Pintana, San Ramón, El Bosque, Lo Espejo, Cerrillos— se expresa no solo en los niveles de acceso a Internet, sino también en la fragilidad estructural que dificulta el desarrollo de capacidades digitales en sus habitantes.
+
+Esta evidencia coincide con lo señalado por la Subsecretaría de Telecomunicaciones (SUBTEL), la cual establece que “la falta de conectividad profundiza las desigualdades territoriales y limita la participación plena de las personas en ámbitos esenciales como educación, salud, trabajo y vida cívica” (SUBTEL, Plan Brecha Digital Cero 2022–2025).
+En las comunas más vulnerables de Santiago, esta afirmación se refleja de forma evidente: la escasa acceso a Internet se suma a déficits históricos de infraestructura, vivienda y servicios urbanos, consolidando nuevas capas de exclusión social.
+
+La integración metodológica utilizada —microsimulación CASEN–Censo, análisis de clusters e Índice de Shannon— permite visualizar esta problemática con mayor profundidad, identificando no solo qué comunas presentan mayores brechas, sino también qué zonas censales dentro de ellas concentran la vulnerabilidad digital.
+Esto abre oportunidades para el diseño de políticas de equidad digital focalizadas a escala barrial, donde la evidencia territorial será fundamental para orientar inversiones públicas, mejorar la infraestructura de telecomunicaciones y fortalecer la alfabetización digital.
 
 ```{r echo=TRUE, message=FALSE, warning=FALSE}
 ## 13. CIERRE DE CONEXIÓN

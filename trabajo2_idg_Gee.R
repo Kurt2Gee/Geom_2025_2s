@@ -267,3 +267,12 @@ get_legend <- function(a_plot) {
 leyenda <- get_legend(leyenda_plot)
 grid::grid.newpage()
 grid::grid.draw(leyenda)
+
+
+if (!dir.exists("output")) dir.create("output")
+
+st_write(
+  zonas_gs_internet,
+  "output/zonas_gs_bamovil.geojson",
+  delete_dsn = TRUE
+)
