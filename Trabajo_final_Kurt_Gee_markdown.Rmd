@@ -117,7 +117,7 @@ Se repartió la demanda comunal hacia manzanas usando ponderación **uniforme** 
 -   **Salidas:**
     -   `parte2_manzanas_demanda_vidrio.gpkg` (capas de manzanas + puntos de demanda)
 
-```{r message=FALSE, warning=FALSE}
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
 pkgs <- c("sf","dplyr","readr","stringr")
 to_install <- pkgs[!sapply(pkgs, requireNamespace, quietly = TRUE)]
 if(length(to_install) > 0) install.packages(to_install)
@@ -142,7 +142,7 @@ OUT_GPKG <- file.path(OUT_DIR, "parte2_manzanas_demanda_vidrio.gpkg")
 
 -    **Chequeos/prints:** muestra tamaños, detecta columna comuna y confirma la unión.
 
-    ```{r cargar casen, message=FALSE, warning=FALSE}
+    ```{r cargar casen, eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
     cat("\n--- [CASEN] Cargando RDS...\n")
     cas_imp  <- readRDS(CASEN_IMP_RDS)
     cas_orig <- readRDS(CASEN_ORIG_RDS)
@@ -193,7 +193,7 @@ OUT_GPKG <- file.path(OUT_DIR, "parte2_manzanas_demanda_vidrio.gpkg")
 
 **Propósito:** quedarse solo con Calera de Tango (13402) e Isla de Maipo (13603), y resumir demanda total por comuna (ponderada).
 
-```{r message=FALSE, warning=FALSE}
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
 CUT_CTG <- 13402  # Calera de Tango
 CUT_IMA <- 13603  # Isla de Maipo
 
@@ -231,7 +231,7 @@ print(dem_com)
 
 -    pesos para reparto (hogares/población; si no existe → uniforme)
 
-    ```{r message=FALSE, warning=FALSE}
+    ```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
     cat("\n--- [MANZANAS] Buscando shapefile en:", MZN_DIR, "...\n")
     MANZ_PATH <- pick_shp_in_dir(MZN_DIR, prefer_pattern = "microdatos|Microdatos|Manzana")
     cat("✅ MANZ_PATH elegido:", MANZ_PATH, "\n")
@@ -263,7 +263,7 @@ print(dem_com)
 
 **Propósito:** filtrar a las comunas objetivo y repartir `demanda_total` a manzanas por comuna (ponderación por `w_manz`; si es uniforme, todas las manzanas comparten igual proporción).
 
-```{r message=FALSE, warning=FALSE}
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
 manz <- manz %>%
   mutate(
     com_cod = suppressWarnings(as.integer(as.character(.data[[com_manz_col]]))),
@@ -302,7 +302,7 @@ dem_pts <- st_point_on_surface(st_make_valid(manz_dem)) %>%
 
 **Propósito:** guardar capas finales (manzanas + demanda y puntos de demanda) y entregar resumen comunal.
 
-```{r message=FALSE, warning=FALSE}
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
 Exportar resultados a GPKG + resumen final
 
 Propósito: guardar capas finales (manzanas + demanda y puntos de demanda) y entregar resumen comunal.
@@ -314,7 +314,7 @@ Propósito: guardar capas finales (manzanas + demanda y puntos de demanda) y ent
 
 **Propósito:** cargar capa de puntos de demanda (manzanas) desde el GPKG y fijar umbral de accesibilidad (10 min caminando).
 
-```{r message=FALSE, warning=FALSE}
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
 umbral_min <- 10
 
 dem_pts <- st_read(OUT_GPKG, layer="demanda_pts", quiet=TRUE)
@@ -333,7 +333,7 @@ cat("✅ Demanda IMA:", nrow(dem_IMA), "\n")
 
 La oferta proviene de OSM (`amenity=recycling`) o de una capa equivalente. Si no se detecta oferta, la cobertura baseline puede resultar 0.
 
-```{r message=FALSE, warning=FALSE}
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
 # oferta_CTG: sf points (amenity=recycling)
 # oferta_IMA: sf points (amenity=recycling)
 
@@ -355,7 +355,7 @@ La oferta proviene de OSM (`amenity=recycling`) o de una capa equivalente. Si no
 
 **Propósito:** seleccionar un conjunto reducido de puntos nuevos desde un set de candidatos para maximizar demanda cubierta dentro del umbral (enfoque MaxCover/greedy).
 
-```{r message=FALSE, warning=FALSE}
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
 p_nuevos_CTG <- 2
 p_nuevos_IMA <- 3
 
@@ -372,7 +372,7 @@ p_nuevos_IMA <- 3
 
 **Propósito:** calcular cobertura y tiempo promedio ponderado (antes vs después), exportar GPKG final + CSV de métricas.
 
-```{r message=FALSE, warning=FALSE}
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
 OUT2_DIR <- file.path(OUT_DIR, "parte2B_final_10min")
 dir.create(OUT2_DIR, showWarnings = FALSE, recursive = TRUE)
 
