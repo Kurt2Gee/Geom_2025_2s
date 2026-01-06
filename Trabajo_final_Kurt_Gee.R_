@@ -1,0 +1,1191 @@
+## ============================================================
+## TRABAJO FINAL IDG - GEOMARKETING (PARTE 1)
+## EPF -> Two-part -> CASEN RM | OPCIÓN 3 (DEMANDA ESPERADA)
+## Proxy: BOTELLAS DE VIDRIO (vía bebidas alcohólicas hogar: 02.1.*)
+## Script COMPLETO + winsor NA-safe + ARREGLO 2 (NA/Inf -> 0 antes winsor)
+## ============================================================
+
+## -------------------------
+## 0) LIBRERÍAS
+## -------------------------
+pkgs <- c("haven","dplyr","stringr","readr","ggplot2","scales","pROC","hexbin","tibble")
+to_install <- pkgs[!sapply(pkgs, requireNamespace, quietly = TRUE)]
+if(length(to_install) > 0) install.packages(to_install)
+
+suppressPackageStartupMessages({
+  library(haven); library(dplyr); library(stringr); library(readr)
+  library(ggplot2); library(scales); library(pROC); library(hexbin); library(tibble)
+})
+
+set.seed(123)
+options(scipen = 999)
+
+## -------------------------
+## 1) RUTAS
+## -------------------------
+BASE_DIR <- "C:/Users/Kurta/OneDrive/Documentos/Geom_2025_2s/push_bdd"
+OUT_DIR  <- file.path(BASE_DIR, "outputs_vidrio")
+dir.create(OUT_DIR, showWarnings = FALSE, recursive = TRUE)
+
+find_file <- function(base_dir, filename) {
+  hits <- list.files(base_dir,
+                     pattern = paste0("^", gsub("\\.", "\\\\.", filename), "$"),
+                     recursive = TRUE, full.names = TRUE, ignore.case = TRUE)
+  hits <- hits[!grepl("/\\._", hits)]
+  if(length(hits) == 0) stop(paste("No encontré el archivo:", filename, "en", base_dir))
+  hits[1]
+}
+
+EPF_PERSONAS <- find_file(BASE_DIR, "base-personas-ix-epf-stata.dta")
+EPF_GASTOS   <- find_file(BASE_DIR, "base-gastos-ix-epf-stata.dta")
+CASEN_RM_RDS <- find_file(BASE_DIR, "casen_rm.rds")
+
+## -------------------------
+## 2) FUNCIONES
+## -------------------------
+to_num <- function(x) suppressWarnings(as.numeric(as.character(x)))
+
+normalize_txt <- function(x) {
+  x <- as.character(x)
+  x <- tolower(x)
+  x <- iconv(x, from = "", to = "ASCII//TRANSLIT")
+  x
+}
+
+make_grupo_escolaridad <- function(anios) {
+  cut(
+    to_num(anios),
+    breaks = c(-Inf, 12, 14, 16, Inf),
+    labels = c("Escolar", "Tecnico", "Universitaria", "Postgrado"),
+    right = TRUE
+  )
+}
+
+pick_best_desc_col <- function(df) {
+  candidates <- c(
+    "glosa","descripcion","desc","detalle","producto","item",
+    "item_desc","nombre_item","nombre","desc_ccif","glosa_ccif",
+    "nom_ccif","ccif_desc","descripcion_ccif"
+  )
+  cands <- intersect(names(df), candidates)
+  if (length(cands) == 0) return(list(best = NA_character_, ranking = tibble()))
+  
+  score_tbl <- lapply(cands, function(col) {
+    x <- df[[col]]
+    x2 <- tryCatch(haven::as_factor(x), error = function(e) x)
+    x2 <- normalize_txt(x2)
+    nonempty <- mean(!is.na(x2) & x2 != "")
+    nd <- dplyr::n_distinct(x2[!is.na(x2) & x2 != ""])
+    score <- nonempty * log1p(nd)
+    tibble(col = col, nonempty = nonempty, n_distinct = nd, score = score)
+  }) %>% bind_rows() %>% arrange(desc(score))
+  
+  list(best = score_tbl$col[1], ranking = score_tbl)
+}
+
+# winsor NA-safe (solo positivos finitos)
+winsorize_pos <- function(x, probs = c(0.01, 0.99)) {
+  x <- as.numeric(x)
+  out <- x
+  idx <- which(!is.na(x) & is.finite(x) & x > 0)
+  if (length(idx) < 20) return(out)
+  q <- quantile(x[idx], probs = probs, na.rm = TRUE, names = FALSE)
+  out[idx] <- pmin(pmax(x[idx], q[1]), q[2])
+  out
+}
+
+## -------------------------
+## 3) CARGA EPF
+## -------------------------
+personas <- read_dta(EPF_PERSONAS)
+gastos   <- read_dta(EPF_GASTOS)
+
+valores_invalidos <- c(-99, -88, -77)
+
+personas_gs <- personas %>%
+  mutate(
+    macrozona = to_num(macrozona),
+    edad      = to_num(edad),
+    edue      = to_num(edue),
+    npersonas = to_num(npersonas),
+    ing_disp_hog_hd_ai = to_num(ing_disp_hog_hd_ai),
+    sexo      = to_num(sexo),
+    n_linea   = to_num(n_linea)
+  ) %>%
+  filter(
+    macrozona == 2,
+    !(edad %in% valores_invalidos),
+    !(edue %in% valores_invalidos),
+    ing_disp_hog_hd_ai >= 0,
+    npersonas > 0
+  ) %>%
+  mutate(
+    ing_pc     = ing_disp_hog_hd_ai / npersonas,
+    log_ing_pc = log1p(ing_pc),
+    sexo_f     = factor(sexo, levels = c(1,2), labels = c("Hombre","Mujer")),
+    grupo_escolaridad = make_grupo_escolaridad(edue)
+  )
+
+## -------------------------
+## 4) EPF: PROXY VIDRIO (ALCOHOL HOGAR: 02.1.*)
+## -------------------------
+gastos_gs <- gastos %>%
+  mutate(
+    macrozona = to_num(macrozona),
+    ccif_chr  = as.character(ccif),
+    gasto_num = to_num(gasto)
+  ) %>%
+  filter(macrozona == 2, !is.na(ccif_chr))
+
+desc_pick <- pick_best_desc_col(gastos_gs)
+desc_col <- desc_pick$best
+write_csv(desc_pick$ranking, file.path(OUT_DIR, "ranking_columnas_descripcion.csv"))
+if (is.na(desc_col)) stop("No encontré columna de descripción. Revisa ranking_columnas_descripcion.csv.")
+
+desc_raw <- tryCatch(haven::as_factor(gastos_gs[[desc_col]]), error = function(e) gastos_gs[[desc_col]])
+gastos_gs <- gastos_gs %>%
+  mutate(
+    desc_txt = normalize_txt(desc_raw),
+    # tokenización para que funcionen bien los \\b (evita casos tipo 'morrones' ~ 'ron')
+    desc_tok = str_squish(str_replace_all(desc_txt, "[^a-z0-9]+", " "))
+  )
+
+n_texto <- sum(!is.na(gastos_gs$desc_tok) & gastos_gs$desc_tok != "")
+if (n_texto < 100) stop("La descripción casi no trae texto. Revisa ranking_columnas_descripcion.csv.")
+
+# ✅ Proxy vidrio: bebidas alcohólicas (muy probable envase de vidrio)
+kw_alcohol <- "\\b(vino|cervez|pisco|whisky|vodka|gin|ron|licor|destilad|espumante|champagne|sidra|coctel)\\b"
+
+gastos_vidrio_cand <- gastos_gs %>%
+  filter(!is.na(desc_tok), desc_tok != "") %>%
+  filter(str_detect(desc_tok, kw_alcohol)) %>%
+  # SOLO HOGAR (evita restaurantes/cafés: 11.*)
+  filter(str_detect(ccif_chr, "^02\\.1\\."))
+
+tabla_ccif_vidrio <- gastos_vidrio_cand %>%
+  group_by(ccif_chr) %>%
+  summarise(
+    n_registros  = n(),
+    gasto_total  = sum(gasto_num, na.rm = TRUE),
+    desc_ejemplo = first(desc_txt),
+    regla        = "proxy_vidrio = alcohol_hogar (02.1.*)",
+    .groups="drop"
+  ) %>%
+  arrange(desc(gasto_total))
+
+write_csv(tabla_ccif_vidrio, file.path(OUT_DIR, "ccif_detectados_vidrio.csv"))
+
+CCIF_VIDRIO <- unique(tabla_ccif_vidrio$ccif_chr)
+if (length(CCIF_VIDRIO) == 0) {
+  # diagnóstico: qué alcohol aparece en glosas (por si hay que ajustar keywords)
+  diag <- gastos_gs %>%
+    filter(!is.na(desc_tok), desc_tok != "") %>%
+    filter(str_detect(desc_tok, "\\b(vino|cervez|pisco|licor|destilad|espum|sidra|coctel)\\b")) %>%
+    count(ccif_chr, desc_txt, sort = TRUE) %>%
+    slice_head(n = 3000)
+  write_csv(diag, file.path(OUT_DIR, "diag_busqueda_vidrio.csv"))
+  stop("No se detectaron CCIF alcohol hogar. Revisa diag_busqueda_vidrio.csv y ajusta kw_alcohol.")
+}
+
+# sumar gasto vidrio por hogar
+gasto_vidrio_folio <- gastos_gs %>%
+  filter(ccif_chr %in% CCIF_VIDRIO) %>%
+  group_by(folio) %>%
+  summarise(gasto_vidrio = sum(gasto_num, na.rm = TRUE), .groups = "drop")
+
+personas_gs <- personas_gs %>%
+  left_join(gasto_vidrio_folio, by = "folio") %>%
+  mutate(
+    gasto_vidrio   = ifelse(is.na(gasto_vidrio), 0, gasto_vidrio),
+    incurre_vidrio = ifelse(gasto_vidrio > 0, 1, 0)
+  )
+
+epf_hogar <- personas_gs %>%
+  group_by(folio) %>%
+  slice_min(order_by = n_linea, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  select(folio, sexo_f, edad, grupo_escolaridad, ing_pc, log_ing_pc, gasto_vidrio, incurre_vidrio) %>%
+  filter(!is.na(sexo_f), !is.na(grupo_escolaridad), !is.na(log_ing_pc)) %>%
+  mutate(gasto_wins = winsorize_pos(gasto_vidrio))
+
+tabla_gasto <- epf_hogar %>% filter(gasto_wins > 0)
+
+## -------------------------
+## 5) GRÁFICOS EPF
+## -------------------------
+png(file.path(OUT_DIR, "plot_01_hist_ing_pc_epf.png"), width = 980, height = 620)
+hist(tabla_gasto$ing_pc, breaks = 30, col = "lightblue",
+     main = "Distribución del Ingreso per cápita (EPF - hogares gastadores)",
+     xlab = "Ingreso per cápita", ylab = "Frecuencia")
+dev.off()
+
+png(file.path(OUT_DIR, "plot_02_hist_gasto_vidrio_epf_foco.png"), width = 980, height = 620)
+hist(pmin(tabla_gasto$gasto_wins, 80000), breaks = 30, col = "gray50",
+     main = "EPF GS: Proxy mensual botellas de vidrio (alcohol hogar) - foco 0 a 80 mil",
+     xlab = "Gasto proxy vidrio (wins/foco)", ylab = "Frecuencia", xlim = c(0,80000))
+dev.off()
+
+png(file.path(OUT_DIR, "plot_03_box_sexo.png"), width = 980, height = 620)
+boxplot(gasto_wins ~ sexo_f, data = tabla_gasto, col = "gray80",
+        main = "Proxy vidrio según Sexo (EPF)",
+        xlab = "Sexo", ylab = "Gasto proxy vidrio (wins)")
+dev.off()
+
+png(file.path(OUT_DIR, "plot_04_box_escolaridad.png"), width = 980, height = 620)
+boxplot(gasto_wins ~ grupo_escolaridad, data = tabla_gasto, col = "gray80",
+        main = "Proxy vidrio según Escolaridad (EPF)",
+        xlab = "Escolaridad", ylab = "Gasto proxy vidrio (wins)")
+dev.off()
+
+p_hex_edad <- ggplot(tabla_gasto, aes(x = edad, y = gasto_wins)) +
+  geom_hex(bins = 35) +
+  geom_smooth(method = "lm", se = TRUE, color = "blue") +
+  labs(title = "Edad vs Proxy vidrio (EPF)", x = "Edad", y = "Gasto proxy vidrio (wins)", fill = "Frecuencia") +
+  scale_y_continuous(labels = label_number(big.mark=".", decimal.mark=",")) +
+  theme_minimal(base_size = 12)
+ggsave(file.path(OUT_DIR, "plot_05_hex_edad.png"), p_hex_edad, width = 9, height = 5, dpi = 130)
+
+p_hex_ing <- ggplot(tabla_gasto, aes(x = ing_pc, y = gasto_wins)) +
+  geom_hex(bins = 35) +
+  geom_smooth(method = "lm", se = TRUE, color = "blue") +
+  labs(title = "Ingreso vs Proxy vidrio (EPF)", x = "Ingreso per cápita", y = "Gasto proxy vidrio (wins)", fill = "Frecuencia") +
+  scale_x_continuous(labels = label_number(big.mark=".", decimal.mark=",")) +
+  scale_y_continuous(labels = label_number(big.mark=".", decimal.mark=",")) +
+  theme_minimal(base_size = 12)
+ggsave(file.path(OUT_DIR, "plot_06_hex_ingreso.png"), p_hex_ing, width = 9, height = 5, dpi = 130)
+
+## -------------------------
+## 6) TRAIN / TEST
+## -------------------------
+set.seed(123)
+idx <- sample.int(nrow(epf_hogar), size = floor(0.7 * nrow(epf_hogar)))
+train <- epf_hogar[idx, ]
+test  <- epf_hogar[-idx, ]
+
+prev_train <- mean(train$incurre_vidrio, na.rm = TRUE)
+prev_test  <- mean(test$incurre_vidrio,  na.rm = TRUE)
+
+## -------------------------
+## 7) MODELO TWO-PART
+## -------------------------
+m_logit <- glm(incurre_vidrio ~ sexo_f + edad + grupo_escolaridad + log_ing_pc,
+               data = train, family = binomial)
+
+test$p_hat <- predict(m_logit, newdata = test, type = "response")
+roc_obj <- roc(test$incurre_vidrio, test$p_hat, quiet = TRUE)
+auc_val <- as.numeric(auc(roc_obj))
+pseudoR2_mcfadden <- 1 - (m_logit$deviance / m_logit$null.deviance)
+
+png(file.path(OUT_DIR, "plot_07_roc_logit_vidrio.png"), width = 980, height = 720)
+plot(roc_obj, col = "blue", lwd = 2,
+     main = paste0("Curva ROC - Logit Proxy Vidrio (AUC=", round(auc_val,3), ")"))
+abline(a = 0, b = 1, lty = 2, col = "gray")
+dev.off()
+
+train_g <- train %>% filter(gasto_wins > 0)
+m_monto <- lm(log1p(gasto_wins) ~ sexo_f + edad + grupo_escolaridad + log_ing_pc,
+              data = train_g)
+
+r2_monto    <- summary(m_monto)$r.squared
+r2adj_monto <- summary(m_monto)$adj.r.squared
+
+test$log_m_hat_all <- predict(m_monto, newdata = test)
+test$m_hat_all <- pmax(exp(test$log_m_hat_all) - 1, 0)
+
+test$gasto_esperado <- test$p_hat * test$m_hat_all
+
+rmse_2part <- sqrt(mean((test$gasto_wins - test$gasto_esperado)^2, na.rm = TRUE))
+ss_res <- sum((test$gasto_wins - test$gasto_esperado)^2, na.rm = TRUE)
+ss_tot <- sum((test$gasto_wins - mean(test$gasto_wins, na.rm = TRUE))^2, na.rm = TRUE)
+r2_two_part_test <- 1 - ss_res/ss_tot
+
+cor_pearson  <- cor(test$gasto_wins, test$gasto_esperado, use="complete.obs")
+cor_spearman <- cor(test$gasto_wins, test$gasto_esperado, use="complete.obs", method="spearman")
+
+## -------------------------
+## 8) CASEN RM: DEMANDA ESPERADA (OPCIÓN 3) + ARREGLO 2
+## -------------------------
+casen <- readRDS(CASEN_RM_RDS)
+
+if (all(c("ytotcorh","tot_per_h") %in% names(casen))) {
+  casen <- casen %>%
+    mutate(ytotcorh = to_num(ytotcorh), tot_per_h = to_num(tot_per_h)) %>%
+    mutate(ing_pc = ifelse(tot_per_h > 0, ytotcorh/tot_per_h, NA_real_))
+} else if ("ypc" %in% names(casen)) {
+  casen <- casen %>% mutate(ing_pc = to_num(ypc))
+} else {
+  stop("CASEN no trae ytotcorh/tot_per_h ni ypc. Revisa nombres de ingreso.")
+}
+
+casen_hogar <- casen %>%
+  mutate(
+    pco1 = to_num(pco1),
+    edad = to_num(edad),
+    sexo = to_num(sexo),
+    esc  = to_num(esc)
+  ) %>%
+  filter(pco1 == 1, is.finite(ing_pc), ing_pc >= 0) %>%
+  mutate(
+    log_ing_pc = log1p(ing_pc),
+    sexo_f = factor(sexo, levels = c(1,2), labels = c("Hombre","Mujer")),
+    grupo_escolaridad = make_grupo_escolaridad(esc)
+  ) %>%
+  select(folio, hogar, sexo_f, edad, grupo_escolaridad, ing_pc, log_ing_pc)
+
+casen_hogar$sexo_f <- factor(casen_hogar$sexo_f, levels = levels(epf_hogar$sexo_f))
+casen_hogar$grupo_escolaridad <- factor(casen_hogar$grupo_escolaridad, levels = levels(epf_hogar$grupo_escolaridad))
+
+casen_hogar$p_hat <- predict(m_logit, newdata = casen_hogar, type = "response")
+casen_hogar$log_m_hat <- predict(m_monto, newdata = casen_hogar)
+casen_hogar$m_hat_det <- pmax(exp(casen_hogar$log_m_hat) - 1, 0)
+
+casen_hogar$gasto_esperado <- casen_hogar$p_hat * casen_hogar$m_hat_det
+
+# ✅ ARREGLO 2: NA/Inf -> 0 antes de winsorizar
+casen_hogar$gasto_esperado <- as.numeric(casen_hogar$gasto_esperado)
+casen_hogar$gasto_esperado[!is.finite(casen_hogar$gasto_esperado)] <- 0
+casen_hogar$gasto_esperado[is.na(casen_hogar$gasto_esperado)] <- 0
+
+casen_hogar$gasto_esperado_wins <- winsorize_pos(casen_hogar$gasto_esperado)
+
+precio_prom_botella <- 1200
+casen_hogar$botellas_equiv <- casen_hogar$gasto_esperado_wins / precio_prom_botella
+
+## -------------------------
+## 9) EXPORTAR + PRINT
+## -------------------------
+resumen_metricas <- tibble(
+  metrica = c(
+    "Prevalencia_train","Prevalencia_test",
+    "AUC_logit_test","PseudoR2_McFadden",
+    "R2_LM_monto","R2adj_LM_monto",
+    "RMSE_two_part_test","R2_two_part_test",
+    "Cor_Pearson_test","Cor_Spearman_test",
+    "desc_col_usada","n_ccif_vidrio"
+  ),
+  valor = c(
+    prev_train, prev_test,
+    auc_val, pseudoR2_mcfadden,
+    r2_monto, r2adj_monto,
+    rmse_2part, r2_two_part_test,
+    cor_pearson, cor_spearman,
+    desc_col, length(CCIF_VIDRIO)
+  )
+)
+
+write_csv(resumen_metricas, file.path(OUT_DIR, "resumen_metricas_vidrio.csv"))
+saveRDS(casen_hogar, file.path(OUT_DIR, "casen_rm_demanda_esperada_vidrio.rds"))
+
+cat("OK ✅ Todo guardado en:\n", OUT_DIR, "\n\n")
+cat("CCIF detectados:", length(CCIF_VIDRIO), " | Columna desc usada:", desc_col, "\n")
+cat("Prevalencia incurrencia (train):", round(prev_train, 3), "\n")
+cat("Prevalencia incurrencia (test) :", round(prev_test,  3), "\n\n")
+cat("AUC (Logit):", round(auc_val, 3), "\n")
+cat("Pseudo-R2 McFadden (Logit):", round(pseudoR2_mcfadden, 3), "\n")
+cat("R2 (LM monto log1p):", round(r2_monto, 3), " | R2 adj:", round(r2adj_monto, 3), "\n\n")
+cat("RMSE two-part (test):", round(rmse_2part, 2), "\n")
+cat("R2 two-part (test):", round(r2_two_part_test, 3), "\n")
+cat("Cor Pearson (test):", round(cor_pearson, 3), "\n")
+cat("Cor Spearman (test):", round(cor_spearman, 3), "\n\n")
+cat("RDS final CASEN: casen_rm_demanda_esperada_vidrio.rds\n")
+
+
+
+
+
+
+
+
+
+## ============================================================
+## PARTE 2A - ESPACIALIZAR DEMANDA (VIDRIO) A MANZANAS
+## Comunas: Calera de Tango vs Isla de Maipo
+## Fixes:
+##  - RDS imputado NO trae comuna -> se recupera desde casen_rm.rds original
+##  - select() sin NA
+##  - "a prueba de balas": as.character antes de as.integer
+##  - filtro robusto de comunas en MANZANAS (CUT 5 dígitos o nombre)
+##  - prints de diagnóstico
+## Output: GPKG con manzanas + demanda + puntos
+## ============================================================
+
+pkgs <- c("sf","dplyr","readr","stringr","tibble")
+to_install <- pkgs[!sapply(pkgs, requireNamespace, quietly = TRUE)]
+if(length(to_install) > 0) install.packages(to_install)
+suppressPackageStartupMessages({
+  library(sf); library(dplyr); library(readr); library(stringr); library(tibble)
+})
+
+options(scipen = 999)
+Sys.setenv(SHAPE_RESTORE_SHX = "YES")
+
+## -------------------------
+## 1) RUTAS
+## -------------------------
+BASE_DIR <- "C:/Users/Kurta/OneDrive/Documentos/Geom_2025_2s/push_bdd"
+OUT_DIR  <- file.path(BASE_DIR, "outputs_vidrio")
+
+CASEN_IMP_RDS  <- file.path(OUT_DIR,  "casen_rm_demanda_esperada_vidrio.rds")
+CASEN_ORIG_RDS <- file.path(BASE_DIR, "casen_rm.rds")
+
+MZN_DIR   <- "D:/Universidad/Plan_urbana/MZN"
+OUT_GPKG  <- file.path(OUT_DIR, "parte2_manzanas_demanda_vidrio.gpkg")
+
+dir.create(OUT_DIR, showWarnings = FALSE, recursive = TRUE)
+
+## -------------------------
+## 2) HELPERS
+## -------------------------
+norm_txt <- function(x){
+  x <- tolower(as.character(x))
+  x <- iconv(x, from="", to="ASCII//TRANSLIT")
+  x <- str_squish(str_replace_all(x, "[^a-z0-9]+", " "))
+  x
+}
+
+pick_col <- function(nms, candidates){
+  hit <- intersect(nms, candidates)
+  if(length(hit)==0) return(NA_character_)
+  hit[1]
+}
+
+pick_by_regex <- function(nms, pattern){
+  hit <- grep(pattern, nms, ignore.case = TRUE, value = TRUE)
+  if(length(hit)==0) return(NA_character_)
+  hit[1]
+}
+
+pick_shp_in_dir <- function(dir_path, prefer_pattern = NULL){
+  if (!dir.exists(dir_path)) stop(paste("No existe la carpeta:", dir_path))
+  shps <- list.files(dir_path, pattern="\\.shp$", full.names=TRUE, ignore.case=TRUE)
+  if (length(shps) == 0) stop(paste("No encontré .shp en:", dir_path))
+  if (!is.null(prefer_pattern)) {
+    hit <- shps[grepl(prefer_pattern, basename(shps), ignore.case=TRUE)]
+    if (length(hit) > 0) return(hit[1])
+  }
+  shps[1]
+}
+
+# elige columna CUT comuna (numérica plausible) desde cas_orig
+find_best_cutcom <- function(df){
+  nms <- names(df)
+  cand <- unique(c(
+    intersect(nms, c("cut_com","CUT_COM","cut_comuna","CUT_COMUNA","comuna","COMUNA","cod_comuna","COD_COMUNA")),
+    grep("cut_?com|cod_?com|comuna", nms, ignore.case=TRUE, value=TRUE)
+  ))
+  cand <- cand[!is.na(cand)]
+  if(length(cand)==0) return(list(best=NA_character_, ranking=tibble()))
+  
+  score_one <- function(col){
+    xch <- as.character(df[[col]])                     # a prueba de balas
+    xn  <- suppressWarnings(as.integer(xch))
+    prop_num <- mean(!is.na(xn))
+    prop_rng <- ifelse(sum(!is.na(xn))>0, mean(xn>=1000 & xn<=20000, na.rm=TRUE), 0)
+    uniq_n   <- length(unique(xn[!is.na(xn)]))
+    penalty  <- ifelse(uniq_n < 3, -1, 0)
+    score <- prop_num + 0.5*prop_rng + penalty
+    tibble(col=col, prop_num=prop_num, prop_rng=prop_rng, uniq_n=uniq_n, score=score,
+           example=head(unique(xch),1))
+  }
+  
+  rk <- bind_rows(lapply(cand, score_one)) %>% arrange(desc(score))
+  list(best=rk$col[1], ranking=rk)
+}
+
+# fallback: nombre comuna si no hay CUT
+find_best_comname <- function(df){
+  nms <- grep("comuna", names(df), ignore.case=TRUE, value=TRUE)
+  if(length(nms)==0) return(NA_character_)
+  best <- NA_character_; best_score <- -Inf
+  for(col in nms){
+    x <- norm_txt(df[[col]])
+    nonempty <- mean(!is.na(x) & x!="")
+    uniqn <- dplyr::n_distinct(x[!is.na(x) & x!=""])
+    score <- nonempty * log1p(uniqn)
+    if(is.finite(score) && score > best_score){
+      best_score <- score; best <- col
+    }
+  }
+  best
+}
+
+## -------------------------
+## 3) CARGAR CASEN + RECUPERAR COMUNA
+## -------------------------
+cat("\n--- [CASEN] Cargando...\n")
+cas_imp  <- readRDS(CASEN_IMP_RDS)
+cas_orig <- readRDS(CASEN_ORIG_RDS)
+
+cat("Filas cas_imp:", nrow(cas_imp), " | cols:", length(names(cas_imp)), "\n")
+cat("Filas cas_orig:", nrow(cas_orig), " | cols:", length(names(cas_orig)), "\n")
+
+stopifnot(all(c("folio","hogar") %in% names(cas_imp)))
+stopifnot(all(c("folio","hogar") %in% names(cas_orig)))
+
+y_col <- pick_col(names(cas_imp), c("gasto_esperado_wins","gasto_esperado","gasto_estimado_wins"))
+if (is.na(y_col)) stop("No encuentro demanda en cas_imp.")
+cat("✅ y_col (demanda):", y_col, "\n")
+
+w_imp <- pick_col(names(cas_imp),  c("expr","expc","factor","fexp","pondera","w"))
+w_org <- pick_col(names(cas_orig), c("expr","expc","factor","fexp","pondera","w"))
+
+if (is.na(w_imp) && is.na(w_org)) {
+  cas_imp$w <- 1
+  w_col <- "w"
+  cat("⚠️ No encontré factor expansión. Usando w=1.\n")
+} else {
+  w_col <- if(!is.na(w_imp)) w_imp else w_org
+  cat("✅ w_col (peso):", w_col, ifelse(is.na(w_imp)," (desde cas_orig)"," (desde cas_imp)"), "\n")
+}
+
+cut_pick <- find_best_cutcom(cas_orig)
+cut_col  <- cut_pick$best
+write_csv(cut_pick$ranking, file.path(OUT_DIR, "diag_columnas_cutcom_casen.csv"))
+
+cat("✅ cut_col elegida:", cut_col, "\n")
+cat("Top 6 candidatas CUT:\n"); print(head(cut_pick$ranking, 6))
+
+name_col <- find_best_comname(cas_orig)
+cat("✅ name_col (fallback):", ifelse(is.na(name_col),"[NO ENCONTRADA]", name_col), "\n")
+
+# join cols SIN NA
+join_cols <- c("folio","hogar")
+if(!is.na(cut_col))  join_cols <- c(join_cols, cut_col)
+if(!is.na(name_col)) join_cols <- c(join_cols, name_col)
+if(is.na(w_imp) && !is.na(w_org)) join_cols <- c(join_cols, w_org)
+join_cols <- unique(join_cols)
+
+cat("✅ Columnas usadas para join desde cas_orig:\n"); print(join_cols)
+
+cas <- cas_imp %>%
+  left_join(cas_orig %>% select(all_of(join_cols)), by=c("folio","hogar"))
+
+## -------------------------
+## 4) FILTRAR COMUNAS OBJETIVO (CUT correctos)
+## -------------------------
+CUT_CTG <- 13403  # Calera de Tango
+CUT_IMA <- 13603  # Isla de Maipo
+
+cat("\n--- [COMUNAS] Filtrando Calera de Tango e Isla de Maipo...\n")
+cas$comuna_cod <- NA_integer_
+if (!is.na(cut_col) && cut_col %in% names(cas)) {
+  cas[[cut_col]] <- as.character(cas[[cut_col]])                 # a prueba de balas
+  cas$comuna_cod <- suppressWarnings(as.integer(cas[[cut_col]]))
+}
+prop_cod <- mean(!is.na(cas$comuna_cod))
+cat("✅ Proporción comuna_cod no-NA:", round(prop_cod, 3), "\n")
+
+if (prop_cod > 0.2) {
+  cat("✅ Modo filtro CASEN: CUT\n")
+  cas <- cas %>%
+    filter(comuna_cod %in% c(CUT_CTG, CUT_IMA)) %>%
+    mutate(comuna_tag = ifelse(comuna_cod==CUT_CTG,"Calera de Tango","Isla de Maipo"))
+} else {
+  if (is.na(name_col) || !(name_col %in% names(cas))) stop("CASEN sin CUT usable y sin nombre de comuna usable.")
+  cat("✅ Modo filtro CASEN: NOMBRE (", name_col, ")\n", sep="")
+  cas <- cas %>%
+    mutate(comuna_nom = norm_txt(.data[[name_col]])) %>%
+    filter(comuna_nom %in% c("calera de tango","isla de maipo")) %>%
+    mutate(comuna_tag = ifelse(comuna_nom=="calera de tango","Calera de Tango","Isla de Maipo"))
+}
+
+cas <- cas %>% mutate(comuna_tag = as.character(comuna_tag))
+cat("✅ Filas CASEN en comunas objetivo:", nrow(cas), "\n")
+cat("✅ Conteo por comuna_tag:\n"); print(table(cas$comuna_tag))
+
+if (!w_col %in% names(cas)) {
+  cas$w <- 1
+  w_col <- "w"
+  cat("⚠️ Peso no quedó disponible tras join. Usando w=1.\n")
+}
+
+dem_com <- cas %>%
+  summarise(
+    demanda_total = sum(.data[[y_col]] * .data[[w_col]], na.rm=TRUE),
+    n_obs_casen   = n(),
+    .by = comuna_tag
+  )
+
+cat("✅ Demanda total por comuna:\n"); print(dem_com)
+write_csv(dem_com, file.path(OUT_DIR, "parte2_demanda_total_por_comuna.csv"))
+
+## -------------------------
+## 5) LEER MANZANAS (Microdatos_Manzana.shp) + FILTRO ROBUSTO
+## -------------------------
+cat("\n--- [MANZANAS] Buscando shapefile en:", MZN_DIR, "...\n")
+MANZ_PATH <- pick_shp_in_dir(MZN_DIR, prefer_pattern = "microdatos|manzana")
+cat("✅ MANZ_PATH elegido:", MANZ_PATH, "\n")
+
+manz <- st_read(MANZ_PATH, quiet=TRUE)
+cat("✅ Manzanas cargadas:", nrow(manz), " | CRS EPSG:", st_crs(manz)$epsg, "\n")
+
+com_manz_col <- pick_col(names(manz), c("CUT_COM","CUT_COMUNA","COD_COM","COMUNA","cod_com","cut_com"))
+if (is.na(com_manz_col)) com_manz_col <- pick_by_regex(names(manz), "cut_?com|cod_?com|comuna")
+if (is.na(com_manz_col)) stop("No encuentro columna comuna en manzanas.")
+cat("✅ com_manz_col detectada:", com_manz_col, "\n")
+
+id_col <- pick_col(names(manz), c("ID_MANZENT","MANZENT","IDMANZENT","COD_MANZ","CUT_MZN","ID_MANZANA"))
+if (is.na(id_col)) { manz$ID_MANZANA_TMP <- seq_len(nrow(manz)); id_col <- "ID_MANZANA_TMP" }
+cat("✅ id_col usada:", id_col, "\n")
+
+# pesos: hogares > población > uniforme
+hog_col <- pick_col(names(manz), c("HOGARES","TOT_HOG","HOGAR","N_HOG","HOG"))
+pob_col <- pick_col(names(manz), c("POB_TOT","POBTOT","POBLACION","TOTAL_POB","PERS"))
+
+if (!is.na(hog_col)) {
+  manz$w_manz <- as.numeric(manz[[hog_col]]); w_used <- hog_col
+} else if (!is.na(pob_col)) {
+  manz$w_manz <- as.numeric(manz[[pob_col]]); w_used <- pob_col
+} else {
+  manz$w_manz <- 1; w_used <- "uniforme"
+}
+cat("✅ Peso para repartir demanda (w_used):", w_used, "\n")
+
+# ---- FILTRO ROBUSTO: extraer CUT 5 dígitos desde COMUNA o usar nombre ----
+dem_com <- dem_com %>% mutate(comuna_tag = as.character(comuna_tag))
+
+com_raw <- as.character(manz[[com_manz_col]])
+cat("✅ Ejemplos de", com_manz_col, "(10):\n")
+print(head(unique(com_raw), 10))
+
+com_cut_txt <- str_extract(com_raw, "\\b\\d{5}\\b")
+manz$com_cod <- suppressWarnings(as.integer(com_cut_txt))
+
+prop_cod_manz <- mean(!is.na(manz$com_cod))
+cat("✅ Proporción CUT 5 dígitos extraíble en manzanas:", round(prop_cod_manz, 3), "\n")
+
+if (prop_cod_manz > 0.05) {
+  cat("✅ Filtro MANZANAS: CUT extraído\n")
+  manz <- manz %>%
+    mutate(
+      comuna_tag = case_when(
+        com_cod == CUT_CTG ~ "Calera de Tango",
+        com_cod == CUT_IMA ~ "Isla de Maipo",
+        TRUE ~ NA_character_
+      )
+    ) %>%
+    filter(!is.na(comuna_tag))
+} else {
+  cat("✅ Filtro MANZANAS: NOMBRE\n")
+  manz <- manz %>%
+    mutate(com_norm = norm_txt(.data[[com_manz_col]])) %>%
+    mutate(
+      comuna_tag = case_when(
+        com_norm == "calera de tango" ~ "Calera de Tango",
+        com_norm == "isla de maipo"   ~ "Isla de Maipo",
+        TRUE ~ NA_character_
+      )
+    ) %>%
+    filter(!is.na(comuna_tag))
+}
+
+manz <- manz %>% mutate(comuna_tag = as.character(comuna_tag))
+manz$w_manz[!is.finite(manz$w_manz) | is.na(manz$w_manz)] <- 0
+
+cat("✅ Manzanas en comunas objetivo:", nrow(manz), "\n")
+cat("✅ Conteo manzanas por comuna_tag:\n"); print(table(manz$comuna_tag))
+
+if (nrow(manz) == 0) {
+  cat("\n❌ Quedó en 0 manzanas. Diagnóstico:\n")
+  top_vals <- sort(table(norm_txt(com_raw)), decreasing=TRUE)
+  print(head(top_vals, 30))
+  stop("Ajusta el match de COMUNA según el diagnóstico.")
+}
+
+## -------------------------
+## 6) REPARTIR DEMANDA A MANZANAS (proporcional)
+## -------------------------
+cat("\n--- [REPARTO] Asignando demanda a manzanas...\n")
+
+manz_dem <- manz %>%
+  left_join(dem_com, by="comuna_tag") %>%
+  group_by(comuna_tag) %>%
+  mutate(
+    w_sum = sum(w_manz, na.rm=TRUE),
+    share = ifelse(w_sum > 0, w_manz / w_sum, 1/n()),
+    demanda_manz = demanda_total * share
+  ) %>%
+  ungroup()
+
+pts_dem <- st_point_on_surface(manz_dem) %>%
+  select(comuna_tag, !!id_col, demanda_manz, w_manz, share)
+
+## -------------------------
+## 7) EXPORTAR
+## -------------------------
+cat("\n--- [EXPORT] Guardando GPKG...\n")
+if (file.exists(OUT_GPKG)) file.remove(OUT_GPKG)
+
+st_write(manz_dem, OUT_GPKG, layer="manzanas_demanda", quiet=TRUE)
+st_write(pts_dem,  OUT_GPKG, layer="puntos_demanda",  quiet=TRUE)
+
+resumen <- manz_dem %>%
+  st_drop_geometry() %>%
+  summarise(
+    n_manzanas = n(),
+    demanda_total = sum(demanda_manz, na.rm=TRUE),
+    demanda_prom_manz = mean(demanda_manz, na.rm=TRUE),
+    w_usado = w_used,
+    .by = comuna_tag
+  )
+
+write_csv(resumen, file.path(OUT_DIR, "parte2_resumen_manzanas.csv"))
+
+cat("\nOK ✅ PARTE 2A LISTA\n")
+cat("GPKG:", OUT_GPKG, "\n")
+cat("Resumen:\n"); print(resumen)
+
+
+
+
+
+
+
+
+
+
+
+
+
+## ============================================================
+## PARTE 2B - METODOLOGÍA FINAL (10 min caminando)
+## Vidrio | Comunas: Calera de Tango vs Isla de Maipo
+## - Oferta actual (OSM: amenity=recycling)
+## - Cobertura 10 min (OSRM perfil foot; fallback euclidiana->min)
+## - Brecha oferta-demanda
+## - Optimización (MaxCover greedy) para ubicar P puntos nuevos
+## - Propuesta + capas finales + métricas comparables
+## ============================================================
+
+pkgs <- c("sf","dplyr","readr","stringr","tibble","osmdata","osrm","units")
+to_install <- pkgs[!sapply(pkgs, requireNamespace, quietly = TRUE)]
+if(length(to_install) > 0) install.packages(to_install)
+
+suppressPackageStartupMessages({
+  library(sf); library(dplyr); library(readr); library(stringr); library(tibble)
+  library(osmdata); library(osrm); library(units)
+})
+
+options(scipen = 999)
+Sys.setenv(SHAPE_RESTORE_SHX = "YES")
+
+## -------------------------
+## 1) RUTAS
+## -------------------------
+BASE_DIR <- "C:/Users/Kurta/OneDrive/Documentos/Geom_2025_2s/push_bdd"
+OUT_DIR  <- file.path(BASE_DIR, "outputs_vidrio")
+
+IN_GPKG   <- file.path(OUT_DIR, "parte2_manzanas_demanda_vidrio.gpkg")
+
+OUT2_DIR  <- file.path(OUT_DIR, "parte2B_final_10min")
+dir.create(OUT2_DIR, showWarnings = FALSE, recursive = TRUE)
+
+OUT_GPKG  <- file.path(OUT2_DIR, "parte2B_resultados_10min.gpkg")
+OUT_MET   <- file.path(OUT2_DIR, "metricas_baseline_vs_propuesta.csv")
+
+## -------------------------
+## 2) PARÁMETROS (10 min)
+## -------------------------
+T_UMBRAL_MIN <- 10
+
+P_NEW_CTG <- 2
+P_NEW_IMA <- 3
+
+MAX_CAND  <- 90
+BATCH_SRC <- 120
+
+EPSG_UTM <- 32719
+WALK_M_PER_MIN <- 80
+
+## -------------------------
+## 3) HELPERS
+## -------------------------
+`%||%` <- function(a,b) if(!is.null(a) && !is.na(a) && length(a)>0) a else b
+
+sf_geom_col <- function(x){
+  attr(x, "sf_column") %||% "geometry"
+}
+
+dedup_points <- function(x){
+  if(nrow(x) == 0) return(x)
+  x$wkt <- st_as_text(st_geometry(x))
+  x <- x %>% distinct(wkt, .keep_all = TRUE) %>% select(-wkt)
+  x
+}
+
+sf_to_osrm <- function(x_sf, id_col = NULL){
+  x_ll <- st_transform(x_sf, 4326)
+  xy <- st_coordinates(x_ll)
+  data.frame(
+    id  = if(is.null(id_col)) seq_len(nrow(x_ll)) else as.character(x_ll[[id_col]]),
+    lon = xy[,1], lat = xy[,2]
+  )
+}
+
+thin_kmeans <- function(pts_sf, n_max = 90){
+  if(nrow(pts_sf) <= n_max) return(pts_sf)
+  xy <- st_coordinates(pts_sf)
+  set.seed(123)
+  km <- kmeans(xy, centers = n_max, iter.max = 40)
+  pts_sf$cluster <- km$cluster
+  centers <- km$centers
+  
+  keep <- sapply(seq_len(n_max), function(k){
+    idx <- which(pts_sf$cluster == k)
+    if(length(idx)==1) return(idx)
+    d <- rowSums((xy[idx,,drop=FALSE] -
+                    matrix(centers[k,], nrow=length(idx), ncol=2, byrow=TRUE))^2)
+    idx[which.min(d)]
+  })
+  pts_sf <- pts_sf[keep, ]
+  pts_sf$cluster <- NULL
+  pts_sf
+}
+
+osrm_setup_walk <- function(){
+  options(osrm.server  = "https://routing.openstreetmap.de/")
+  options(osrm.profile = "foot")
+}
+
+osrm_time_matrix_min <- function(src_pts_sf, dst_pts_sf, batch_src = 120, epsg_fallback = 32719){
+  osrm_setup_walk()
+  
+  ok <- TRUE
+  tryCatch({
+    invisible(osrmTable(src = sf_to_osrm(src_pts_sf[1,]), dst = sf_to_osrm(dst_pts_sf[1,])))
+  }, error = function(e) { ok <<- FALSE })
+  
+  if(!ok){
+    message("⚠️ OSRM falló. Fallback: distancia euclidiana -> minutos (", WALK_M_PER_MIN, " m/min).")
+    src_utm <- st_transform(src_pts_sf, epsg_fallback)
+    dst_utm <- st_transform(dst_pts_sf, epsg_fallback)
+    Dm <- st_distance(src_utm, dst_utm)
+    Dm <- as.matrix(Dm)
+    Dm <- apply(Dm, 2, as.numeric)
+    return(Dm / WALK_M_PER_MIN)
+  }
+  
+  src_df_all <- sf_to_osrm(src_pts_sf)
+  dst_df     <- sf_to_osrm(dst_pts_sf)
+  
+  n <- nrow(src_df_all)
+  m <- nrow(dst_df)
+  out <- matrix(NA_real_, nrow = n, ncol = m)
+  
+  idx_starts <- seq(1, n, by = batch_src)
+  for(s in idx_starts){
+    e <- min(s + batch_src - 1, n)
+    src_df <- src_df_all[s:e, ]
+    tab <- osrmTable(src = src_df, dst = dst_df)
+    out[s:e, ] <- as.matrix(tab$durations)
+    message("   OSRM batch ", s, "-", e, " / ", n)
+  }
+  out
+}
+
+row_mins <- function(M){
+  apply(M, 1, min, na.rm = TRUE)
+}
+
+maxcover_greedy <- function(time_mat_min, w_norm, t_umbral, p_new, already_covered = NULL){
+  n <- nrow(time_mat_min); m <- ncol(time_mat_min)
+  if(is.null(already_covered)) already_covered <- rep(FALSE, n)
+  
+  covered <- already_covered
+  remaining <- seq_len(m)
+  chosen <- integer(0)
+  
+  for(k in seq_len(p_new)){
+    gains <- sapply(remaining, function(j){
+      newly <- (!covered) & (time_mat_min[,j] <= t_umbral)
+      sum(w_norm[newly], na.rm = TRUE)
+    })
+    j_best <- remaining[which.max(gains)]
+    if(length(j_best)==0 || max(gains, na.rm=TRUE) <= 0) break
+    chosen <- c(chosen, j_best)
+    covered <- covered | (time_mat_min[,j_best] <= t_umbral)
+    remaining <- setdiff(remaining, j_best)
+  }
+  list(chosen = chosen, covered = covered)
+}
+
+safe_iso_10min <- function(fac_sf, epsg_fallback = 32719, tmin = 10){
+  osrm_setup_walk()
+  df <- sf_to_osrm(fac_sf)
+  
+  iso <- tryCatch({
+    iso_list <- lapply(seq_len(nrow(df)), function(i){
+      osrmIsochrone(loc = df[i,], breaks = c(tmin))
+    })
+    st_as_sf(do.call(rbind, iso_list))
+  }, error = function(e) NULL)
+  
+  if(!is.null(iso)){
+    return(st_make_valid(iso))
+  }
+  
+  fac_utm <- st_transform(fac_sf, epsg_fallback)
+  buf_m <- tmin * WALK_M_PER_MIN
+  buf <- st_buffer(fac_utm, dist = buf_m)
+  st_as_sf(st_transform(buf, st_crs(fac_sf)))
+}
+
+## ------------------------------------------------------------
+## OSM "geom-only" (no falla por columnas distintas)
+## ------------------------------------------------------------
+get_osm_points_geom <- function(poly_sf, key, value, label){
+  poly_ll <- st_transform(poly_sf, 4326)
+  bb <- st_bbox(poly_ll)
+  
+  res <- tryCatch({
+    opq(bb) %>% add_osm_feature(key = key, value = value) %>% osmdata_sf()
+  }, error = function(e) NULL)
+  
+  if (is.null(res)) return(NULL)
+  
+  geoms <- list()
+  if(!is.null(res$osm_points) && nrow(res$osm_points) > 0){
+    geoms[[length(geoms)+1]] <- st_geometry(res$osm_points)
+  }
+  if(!is.null(res$osm_polygons) && nrow(res$osm_polygons) > 0){
+    geoms[[length(geoms)+1]] <- st_geometry(suppressWarnings(st_centroid(res$osm_polygons)))
+  }
+  if(!is.null(res$osm_multipolygons) && nrow(res$osm_multipolygons) > 0){
+    geoms[[length(geoms)+1]] <- st_geometry(suppressWarnings(st_centroid(res$osm_multipolygons)))
+  }
+  
+  if(length(geoms) == 0) return(NULL)
+  g <- do.call(c, geoms)
+  
+  st_sf(source = label, geometry = g, crs = 4326)
+}
+
+layer_name <- function(prefix, tag){
+  code <- ifelse(tag=="Calera de Tango","CTG","IMA")
+  paste0(prefix, "_", code)
+}
+
+## -------------------------
+## 4) INPUT: leer GPKG 2A
+## -------------------------
+cat("\n--- [INPUT] Leyendo:", IN_GPKG, "\n")
+manz_dem <- st_read(IN_GPKG, layer = "manzanas_demanda", quiet = TRUE)
+pts_dem  <- st_read(IN_GPKG, layer = "puntos_demanda",  quiet = TRUE)
+
+# INFO: nombre real de la geometría
+cat("✅ Geometry col (manz_dem):", sf_geom_col(manz_dem), "\n")
+cat("✅ Geometry col (pts_dem) :", sf_geom_col(pts_dem),  "\n")
+
+pts_dem$demanda_manz <- as.numeric(pts_dem$demanda_manz)
+pts_dem$demanda_manz[!is.finite(pts_dem$demanda_manz) | is.na(pts_dem$demanda_manz)] <- 0
+
+manz_dem <- st_transform(manz_dem, EPSG_UTM)
+pts_dem  <- st_transform(pts_dem,  EPSG_UTM)
+
+cat("✅ Comunas en demanda:\n")
+print(table(pts_dem$comuna_tag))
+
+## -------------------------
+## 5) METODOLOGÍA POR COMUNA
+## -------------------------
+metrics_list <- list()
+layers_out <- list()
+
+for(tag in c("Calera de Tango","Isla de Maipo")){
+  
+  cat("\n============================\n")
+  cat("COMUNA:", tag, "\n")
+  
+  P_NEW <- ifelse(tag=="Calera de Tango", P_NEW_CTG, P_NEW_IMA)
+  
+  dem_pts <- pts_dem  %>% filter(comuna_tag == tag)
+  dem_pol <- manz_dem %>% filter(comuna_tag == tag)
+  poly <- st_union(dem_pol)
+  
+  geom_col_dem <- sf_geom_col(dem_pts)  # <- CLAVE
+  
+  cat("✅ Puntos demanda:", nrow(dem_pts),
+      " | P nuevos:", P_NEW,
+      " | Umbral:", T_UMBRAL_MIN, "min\n")
+  
+  w <- dem_pts$demanda_manz
+  if(all(w==0)) w <- rep(1, nrow(dem_pts))
+  w_norm <- w / sum(w)
+  
+  ## -------- Oferta actual ----------
+  message("   [OSM] Descargando oferta actual (amenity=recycling)...")
+  oferta <- get_osm_points_geom(poly, "amenity", "recycling", label = "recycling")
+  
+  if(!is.null(oferta)){
+    oferta <- st_transform(oferta, EPSG_UTM)
+    oferta <- oferta[st_within(oferta, st_union(poly), sparse = FALSE), ]
+    oferta <- dedup_points(oferta)
+    oferta$tipo <- "oferta_recycling"
+  } else {
+    oferta <- st_sf(tipo = character(0), geometry = st_sfc(crs = st_crs(poly)))
+  }
+  cat("✅ Oferta actual (OSM recycling):", nrow(oferta), "\n")
+  
+  ## -------- Candidatos ----------
+  message("   [OSM] Descargando candidatos (supermarket, townhall, parking, school, community_centre)...")
+  
+  cand_list <- list(
+    get_osm_points_geom(poly, "shop",   "supermarket",      label = "supermarket"),
+    get_osm_points_geom(poly, "amenity","townhall",         label = "townhall"),
+    get_osm_points_geom(poly, "amenity","parking",          label = "parking"),
+    get_osm_points_geom(poly, "amenity","school",           label = "school"),
+    get_osm_points_geom(poly, "amenity","community_centre", label = "community_centre")
+  )
+  cand_list <- cand_list[!sapply(cand_list, is.null)]
+  
+  if(length(cand_list) == 0){
+    message("   ⚠️ Sin candidatos OSM. Fallback: usar puntos de demanda como candidatos.")
+    cand <- dem_pts %>% select(all_of(geom_col_dem)) %>% mutate(source="fallback_demanda", tipo="fallback_demanda")
+    st_geometry(cand) <- geom_col_dem
+  } else {
+    cand <- bind_rows(cand_list)
+    cand <- st_transform(cand, EPSG_UTM)
+    cand <- cand[st_within(cand, st_union(poly), sparse = FALSE), ]
+    cand <- dedup_points(cand)
+    cand$tipo <- "candidato_osm"
+  }
+  
+  if(nrow(oferta)>0 && nrow(cand)>0){
+    d2 <- st_distance(cand, oferta)
+    d2 <- apply(as.matrix(d2), 1, min, na.rm=TRUE)
+    cand <- cand[as.numeric(d2) > 30, ]
+  }
+  
+  cand <- thin_kmeans(cand, n_max = MAX_CAND)
+  cat("✅ Candidatos finales:", nrow(cand), "\n")
+  
+  if(nrow(cand) == 0){
+    stop("Cand=0: no hay candidatos para optimizar en ", tag)
+  }
+  
+  ## -------- Cobertura baseline ----------
+  if(nrow(oferta) == 0){
+    baseline_min <- rep(Inf, nrow(dem_pts))
+  } else {
+    time_baseline <- osrm_time_matrix_min(dem_pts, oferta, batch_src = BATCH_SRC, epsg_fallback = EPSG_UTM)
+    baseline_min  <- row_mins(time_baseline)
+  }
+  
+  baseline_cov <- baseline_min <= T_UMBRAL_MIN
+  cov_share_baseline <- sum(w_norm[baseline_cov], na.rm=TRUE)
+  
+  ## -------- Brecha ----------
+  brecha_pts <- dem_pts %>%
+    mutate(t_min_baseline = baseline_min,
+           covered_baseline = baseline_cov) %>%
+    filter(!covered_baseline)
+  
+  cat("✅ Brecha (NO cubiertos a 10 min):", nrow(brecha_pts), "\n")
+  
+  ## -------- Optimización MaxCover ----------
+  time_cand <- osrm_time_matrix_min(dem_pts, cand, batch_src = BATCH_SRC, epsg_fallback = EPSG_UTM)
+  
+  sol <- maxcover_greedy(time_cand, w_norm, T_UMBRAL_MIN, P_NEW, already_covered = baseline_cov)
+  chosen_idx <- sol$chosen
+  
+  if(length(chosen_idx)==0){
+    message("⚠️ No se encontraron mejoras bajo el umbral (o ya está todo cubierto). Se exporta baseline igual.")
+  }
+  
+  propuesta <- cand[chosen_idx, , drop=FALSE]
+  if(nrow(propuesta)>0) propuesta$tipo <- "propuesta_optimizada"
+  
+  ## -------- Métricas propuesta ----------
+  if(length(chosen_idx)>0){
+    prop_min_extra <- row_mins(time_cand[, chosen_idx, drop=FALSE])
+    improved_min <- pmin(baseline_min, prop_min_extra)
+  } else {
+    improved_min <- baseline_min
+  }
+  
+  improved_cov <- improved_min <= T_UMBRAL_MIN
+  cov_share_improved <- sum(w_norm[improved_cov], na.rm=TRUE)
+  
+  mean_baseline <- sum(w_norm * pmin(baseline_min, 9999), na.rm=TRUE)
+  mean_improved <- sum(w_norm * pmin(improved_min,  9999), na.rm=TRUE)
+  
+  met <- tibble(
+    comuna = tag,
+    umbral_min = T_UMBRAL_MIN,
+    n_demanda = nrow(dem_pts),
+    n_oferta_actual = nrow(oferta),
+    n_candidatos = nrow(cand),
+    p_nuevos = P_NEW,
+    n_seleccionados = length(chosen_idx),
+    cobertura_baseline = cov_share_baseline,
+    cobertura_mejorada  = cov_share_improved,
+    delta_cobertura     = cov_share_improved - cov_share_baseline,
+    tprom_pond_baseline = mean_baseline,
+    tprom_pond_mejorada = mean_improved,
+    delta_tprom_pond    = mean_improved - mean_baseline
+  )
+  print(met)
+  
+  ## -------- Capas finales (FIX select geometry dinámico) ----------
+  dem_out <- dem_pts %>%
+    mutate(
+      t_min_baseline = baseline_min,
+      t_min_mejorada = improved_min,
+      covered_baseline = baseline_cov,
+      covered_mejorada = improved_cov
+    ) %>%
+    select(comuna_tag, demanda_manz, t_min_baseline, t_min_mejorada,
+           covered_baseline, covered_mejorada, all_of(geom_col_dem))
+  
+  # asegurar que sigue siendo sf
+  st_geometry(dem_out) <- geom_col_dem
+  
+  iso_base <- NULL
+  if(nrow(oferta)>0){
+    message("   [ISO] Isócronas 10 min (oferta actual)...")
+    iso_base <- safe_iso_10min(oferta, epsg_fallback = EPSG_UTM, tmin = T_UMBRAL_MIN) %>%
+      mutate(comuna_tag = tag, tipo = "iso_oferta_10min") %>%
+      st_transform(EPSG_UTM)
+  }
+  
+  iso_prop <- NULL
+  if(nrow(propuesta)>0){
+    message("   [ISO] Isócronas 10 min (propuesta)...")
+    iso_prop <- safe_iso_10min(propuesta, epsg_fallback = EPSG_UTM, tmin = T_UMBRAL_MIN) %>%
+      mutate(comuna_tag = tag, tipo = "iso_propuesta_10min") %>%
+      st_transform(EPSG_UTM)
+  }
+  
+  metrics_list[[tag]] <- met
+  
+  layers_out[[layer_name("demanda", tag)]]    <- dem_out
+  layers_out[[layer_name("brecha", tag)]]     <- brecha_pts
+  layers_out[[layer_name("oferta", tag)]]     <- if(nrow(oferta)>0)  oferta  %>% mutate(comuna_tag=tag) else oferta
+  layers_out[[layer_name("cand", tag)]]       <- cand %>% mutate(comuna_tag=tag)
+  layers_out[[layer_name("propuesta", tag)]]  <- if(nrow(propuesta)>0) propuesta %>% mutate(comuna_tag=tag) else propuesta
+  
+  if(!is.null(iso_base)) layers_out[[layer_name("iso_oferta", tag)]] <- iso_base
+  if(!is.null(iso_prop)) layers_out[[layer_name("iso_prop", tag)]]   <- iso_prop
+}
+
+## -------------------------
+## 6) EXPORTAR
+## -------------------------
+metrics_all <- bind_rows(metrics_list)
+write_csv(metrics_all, OUT_MET)
+
+cat("\n--- [EXPORT] Guardando GPKG:", OUT_GPKG, "\n")
+if (file.exists(OUT_GPKG)) file.remove(OUT_GPKG)
+
+for(nm in names(layers_out)){
+  obj <- layers_out[[nm]]
+  if(is.null(obj)) next
+  if(inherits(obj, "sf") && nrow(obj)==0) next
+  st_write(obj, OUT_GPKG, layer = nm, quiet = TRUE)
+}
+
+cat("\nOK ✅ PARTE 2B LISTA (10 min)\n")
+cat("Carpeta:", OUT2_DIR, "\n")
+cat("GPKG:", OUT_GPKG, "\n")
+cat("CSV métricas:", OUT_MET, "\n")
+print(metrics_all)
