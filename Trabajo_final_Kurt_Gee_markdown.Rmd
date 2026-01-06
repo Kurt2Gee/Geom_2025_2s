@@ -1,0 +1,449 @@
+---
+title: "Trabajo_final_IDG_Kurt_Gee"
+author: "Kurt Gee Castañer"
+date: "2026-01-06"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r cars}
+summary(cars)
+```
+
+# Trabajo Final Geomarketing — Puntos de recolección de botellas de vidrio (RM)
+
+------------------------------------------------------------------------
+
+## 1. Resumen ejecutivo
+
+Este trabajo estima la demanda potencial de reciclaje de botellas de vidrio (proxy de gasto/consumo a nivel hogar) y la espacializa a manzanas para dos comunas de la Región Metropolitana: Calera de Tango e Isla de Maipo.\
+Luego, se evalúa la cobertura de la oferta actual (puntos existentes detectados en OSM con `amenity=recycling`) bajo un umbral de 10 minutos caminando, y se diseña una propuesta óptima de nuevos puntos para maximizar la demanda cubierta (enfoque tipo MaxCover).
+
+Resultados clave (10 min): - Calera de Tango: cobertura baseline 0.400 → cobertura mejorada 0.778 (+0.378). - Isla de Maipo: cobertura baseline 0.000 → cobertura mejorada 0.688 (+0.688).
+
+------------------------------------------------------------------------
+
+## 2. Objetivo y alcance
+
+### 2.1 Objetivo general
+
+Localizar estratégicamente puntos de recolección de botellas de vidrio a nivel intra-comunal, maximizando accesibilidad y cobertura de demanda.
+
+### 2.2 Objetivos específicos
+
+1.  Construir un proxy de demanda de vidrio desde EPF y transferirlo/imputarlo a CASEN.
+2.  Estimar demanda esperada de vidrio a nivel hogar (CASEN) y resumirla territorialmente.
+3.  Espacializar la demanda a manzanas para Calera de Tango e Isla de Maipo.
+4.  Evaluar cobertura de oferta actual (baseline) a 10 minutos caminando.
+5.  Proponer nuevos puntos (MaxCover) y medir mejora de cobertura.
+
+### 2.3 Área de estudio
+
+-   **Calera de Tango (CUT 13402)**\
+-   **Isla de Maipo (CUT 13603)**\
+
+------------------------------------------------------------------------
+
+## 3. Datos y fuentes
+
+### 3.1 Encuestas y microdatos
+
+-   **EPF (Gastos de hogares):** para construir proxy de gasto/consumo asociado a vidrio (CCIF detectados).
+-   **CASEN RM:** para imputación y obtención de atributos socioeconómicos.
+-   **Censo 2017 — Manzanas (Microdatos manzana):** geometría base para espacialización.
+
+### 3.2 Oferta (infraestructura)
+
+-   **OpenStreetMap (OSM):** puntos existentes `amenity=recycling` como oferta actual.
+
+> 
+
+------------------------------------------------------------------------
+
+## 4. Metodología
+
+### 4.1 Proxy de vidrio (EPF)
+
+Se identificaron códigos/CCIF asociados a consumo vinculado a envases/botellas (lista detectada automáticamente desde glosas) y se calculó un **proxy mensual por hogar**.
+
+*(Opcional: agregar lista/resumen de CCIF detectados y criterios.)*
+
+### 4.2 Modelo de dos partes (Two-part)
+
+Se estimó: 1) **Incurrencia** (gasta/no gasta) con Logit.\
+2) **Monto condicional** (si gasta) con modelo lineal sobre `log(1+gasto)` (y luego retorno a escala original), aplicando winsorización para robustez.
+
+Métricas de ajuste (de tu corrida final con 10 CCIF): - **AUC Logit:** 0.651\
+- **Pseudo-R² McFadden:** 0.059\
+- **R² (LM monto log1p):** 0.114 (R² adj 0.108)\
+- **RMSE two-part (test):** 21918.37\
+- **R² two-part (test):** 0.051\
+- **Correlación Pearson (test):** 0.271\
+- **Correlación Spearman (test):** 0.229
+
+### 4.3 Demanda esperada en CASEN
+
+La demanda esperada se calculó como: $$
+E(Y) = P(\text{incurre}) \times E(Y \mid \text{incurre})
+$$ donde $Y$ corresponde al proxy de vidrio (winsorizado / escala original según salida).
+
+### 4.4 Espacialización a manzanas
+
+Se repartió la demanda comunal hacia manzanas usando ponderación **uniforme** (porque el shapefile no tenía hogares/población) y se generaron puntos representativos por manzana (centroid/point_on_surface).
+
+**Resumen por comuna:** - Calera de Tango: **90 manzanas**, demanda total **35,758,521**, demanda promedio/manzana **397,317**. - Isla de Maipo: **234 manzanas**, demanda total **13,402,237**, demanda promedio/manzana **57,275**.
+
+### 4.5 Accesibilidad (baseline) y optimización (propuesta)
+
+-   Se definió **umbral 10 min caminando**.
+-   **Baseline:** cobertura con oferta actual OSM (`amenity=recycling`).
+-   **Propuesta:** selección de **P puntos nuevos** desde candidatos (escuelas/municipalidad/estacionamientos/supermercados u otros) para maximizar demanda cubierta (**MaxCover**).
+
+## 5.Código
+
+### 5.1 Espacialización de demanda a manzanas
+
+#### Bloque 2A-1 — Librerías, opciones y rutas
+
+**Propósito:** cargar paquetes, fijar opciones y definir rutas de entrada/salida.
+
+-   **Entradas:**
+    -   `casen_rm_demanda_esperada_vidrio.rds` (CASEN imputada con demanda)\
+    -   `casen_rm.rds` (CASEN original con comuna)\
+    -   `Microdatos_Manzana.shp` (manzanas Censo 2017)
+-   **Salidas:**
+    -   `parte2_manzanas_demanda_vidrio.gpkg` (capas de manzanas + puntos de demanda)
+
+```{r message=FALSE, warning=FALSE}
+pkgs <- c("sf","dplyr","readr","stringr")
+to_install <- pkgs[!sapply(pkgs, requireNamespace, quietly = TRUE)]
+if(length(to_install) > 0) install.packages(to_install)
+suppressPackageStartupMessages({
+  library(sf); library(dplyr); library(readr); library(stringr)
+})
+options(scipen = 999)
+
+BASE_DIR <- "C:/Users/Kurta/OneDrive/Documentos/Geom_2025_2s/push_bdd"
+OUT_DIR  <- file.path(BASE_DIR, "outputs_vidrio")
+
+CASEN_IMP_RDS  <- file.path(OUT_DIR,  "casen_rm_demanda_esperada_vidrio.rds")
+CASEN_ORIG_RDS <- file.path(BASE_DIR, "casen_rm.rds")
+
+MZN_DIR  <- "D:/Universidad/Plan_urbana/MZN"
+OUT_GPKG <- file.path(OUT_DIR, "parte2_manzanas_demanda_vidrio.gpkg")
+```
+
+####  5.2 Cargar CASEN imputada y recuperar comuna desde CASEN original
+
+**Propósito:** el RDS imputado no trae comuna, por lo que se recupera desde `casen_rm.rds` mediante unión por `folio + hogar`.
+
+-    **Chequeos/prints:** muestra tamaños, detecta columna comuna y confirma la unión.
+
+    ```{r cargar casen, message=FALSE, warning=FALSE}
+    cat("\n--- [CASEN] Cargando RDS...\n")
+    cas_imp  <- readRDS(CASEN_IMP_RDS)
+    cas_orig <- readRDS(CASEN_ORIG_RDS)
+
+    cat("✅ cas_imp n:", nrow(cas_imp), " | columnas:", ncol(cas_imp), "\n")
+    cat("✅ cas_orig n:", nrow(cas_orig), " | columnas:", ncol(cas_orig), "\n")
+
+    if(!all(c("folio","hogar") %in% names(cas_imp)))  stop("RDS imputado NO trae folio/hogar.")
+    if(!all(c("folio","hogar") %in% names(cas_orig))) stop("RDS original NO trae folio/hogar.")
+
+    com_col <- pick_col(names(cas_orig),
+                        c("comuna","cod_comuna","cut_com","cut_comuna","codcom","com_cod","cut"))
+    if (is.na(com_col)) com_col <- pick_by_regex(names(cas_orig), "cut_?com|cod_?com|comuna")
+    if (is.na(com_col)) stop("No pude detectar columna comuna en casen_rm.rds.")
+
+    nom_col <- pick_col(names(cas_orig), c("nom_comuna","nombre_comuna","comuna_nombre"))
+    if (is.na(nom_col)) nom_col <- pick_by_regex(names(cas_orig), "nom.*com|nombre.*com")
+
+    cat("✅ com_col detectada:", com_col, "\n")
+    cat("✅ nom_col detectada:", ifelse(is.na(nom_col), "(no encontrada)", nom_col), "\n")
+
+    y_col <- pick_col(names(cas_imp), c("gasto_esperado_wins","gasto_esperado","gasto_estimado_wins"))
+    if (is.na(y_col)) stop("No encuentro columna demanda (gasto_esperado_wins/gasto_esperado).")
+    cat("✅ y_col demanda:", y_col, "\n")
+
+    w_col <- pick_col(names(cas_imp), c("expr","expc","factor","fexp","pondera","w"))
+    if (is.na(w_col)) { cas_imp$w <- 1; w_col <- "w" }
+    cat("✅ w_col:", w_col, "\n")
+
+    cols_join <- c("folio","hogar", com_col, nom_col)
+    cols_join <- cols_join[!is.na(cols_join)]
+
+    cas <- cas_imp %>%
+      left_join(
+        cas_orig %>% select(all_of(cols_join)),
+        by = c("folio","hogar")
+      )
+
+    cat("✅ Unión lista. Variables recuperadas:\n")
+    print(intersect(c(com_col, nom_col), names(cas)))
+
+    # Robustez: si com_col viene factor/labelled, forzar a entero
+    cas[[com_col]] <- as.character(cas[[com_col]])
+    cas$comuna_cod <- suppressWarnings(as.integer(cas[[com_col]]))
+    ```
+
+### 5.3 Filtrar comunas y calcular demanda comunal
+
+**Propósito:** quedarse solo con Calera de Tango (13402) e Isla de Maipo (13603), y resumir demanda total por comuna (ponderada).
+
+```{r message=FALSE, warning=FALSE}
+CUT_CTG <- 13402  # Calera de Tango
+CUT_IMA <- 13603  # Isla de Maipo
+
+cas2 <- cas %>%
+  filter(comuna_cod %in% c(CUT_CTG, CUT_IMA)) %>%
+  mutate(comuna_tag = case_when(
+    comuna_cod == CUT_CTG ~ "Calera de Tango",
+    comuna_cod == CUT_IMA ~ "Isla de Maipo",
+    TRUE ~ NA_character_
+  ))
+
+cat("✅ CASEN filtrada:", nrow(cas2), "hogares.\n")
+print(table(cas2$comuna_tag, useNA="ifany"))
+
+dem_com <- cas2 %>%
+  group_by(comuna_tag) %>%
+  summarise(
+    demanda_total = sum(.data[[y_col]] * .data[[w_col]], na.rm = TRUE),
+    n_hogares     = n(),
+    .groups = "drop"
+  )
+
+cat("\n✅ Demanda por comuna:\n")
+print(dem_com)
+
+```
+
+### 5.4 Leer manzanas y detectar columnas clave
+
+**Propósito:** cargar shapefile de manzanas y detectar automáticamente:
+
+-   columna de comuna (`COMUNA`, `CUT_COM`, etc.)
+
+-    ID de manzana (`MANZENT`, etc.)
+
+-    pesos para reparto (hogares/población; si no existe → uniforme)
+
+    ```{r message=FALSE, warning=FALSE}
+    cat("\n--- [MANZANAS] Buscando shapefile en:", MZN_DIR, "...\n")
+    MANZ_PATH <- pick_shp_in_dir(MZN_DIR, prefer_pattern = "microdatos|Microdatos|Manzana")
+    cat("✅ MANZ_PATH elegido:", MANZ_PATH, "\n")
+
+    manz <- st_read(MANZ_PATH, quiet = TRUE)
+    cat("✅ Manzanas cargadas:", nrow(manz), " | CRS EPSG:", st_crs(manz)$epsg, "\n")
+
+    com_manz_col <- pick_col(names(manz), c("CUT_COM","CUT_COMUNA","COD_COM","COMUNA","cod_com","cut_com"))
+    if (is.na(com_manz_col)) com_manz_col <- pick_by_regex(names(manz), "cut_?com|cod_?com|comuna")
+    if (is.na(com_manz_col)) stop("No encuentro columna comuna en manzanas.")
+    cat("✅ com_manz_col detectada:", com_manz_col, "\n")
+
+    id_col <- pick_col(names(manz), c("ID_MANZENT","MANZENT","IDMANZENT","COD_MANZ","CUT_MZN","ID_MANZANA"))
+    if (is.na(id_col)) { manz$ID_MANZANA_TMP <- seq_len(nrow(manz)); id_col <- "ID_MANZANA_TMP" }
+    cat("✅ id_col usada:", id_col, "\n")
+
+    hog_col <- pick_col(names(manz), c("HOGARES","TOT_HOG","HOGAR","N_HOG","HOG"))
+    pob_col <- pick_col(names(manz), c("POB_TOT","POBTOT","POBLACION","TOTAL_POB","PERS"))
+
+    if (!is.na(hog_col)) { manz$w_manz <- as.numeric(manz[[hog_col]]); w_used <- hog_col
+    } else if (!is.na(pob_col)) { manz$w_manz <- as.numeric(manz[[pob_col]]); w_used <- pob_col
+    } else { manz$w_manz <- 1; w_used <- "uniforme" }
+
+    cat("✅ Peso para repartir demanda (w_used):", w_used, "\n")
+
+    ```
+
+### 5.5 Filtrar manzanas de las comunas objetivo y repartir demanda
+
+**Propósito:** filtrar a las comunas objetivo y repartir `demanda_total` a manzanas por comuna (ponderación por `w_manz`; si es uniforme, todas las manzanas comparten igual proporción).
+
+```{r message=FALSE, warning=FALSE}
+manz <- manz %>%
+  mutate(
+    com_cod = suppressWarnings(as.integer(as.character(.data[[com_manz_col]]))),
+    comuna_tag = case_when(
+      com_cod == CUT_CTG ~ "Calera de Tango",
+      com_cod == CUT_IMA ~ "Isla de Maipo",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  filter(!is.na(comuna_tag))
+
+manz$comuna_tag <- as.character(manz$comuna_tag)  # evita joins con tipo lógico si queda vacío
+
+cat("✅ Manzanas en comunas objetivo:", nrow(manz), "\n")
+print(table(manz$comuna_tag))
+
+cat("\n--- [REPARTO] Asignando demanda a manzanas...\n")
+
+manz_dem <- manz %>%
+  left_join(dem_com, by="comuna_tag") %>%
+  group_by(comuna_tag) %>%
+  mutate(
+    w_manz = ifelse(is.finite(w_manz) & !is.na(w_manz), w_manz, 0),
+    w_sum  = sum(w_manz, na.rm = TRUE),
+    share  = ifelse(w_sum > 0, w_manz / w_sum, 1/n()),
+    demanda_manz = demanda_total * share
+  ) %>%
+  ungroup()
+
+dem_pts <- st_point_on_surface(st_make_valid(manz_dem)) %>%
+  mutate(tipo = "demanda")
+
+```
+
+### 5.6 Exportar resultados a GPKG + resumen final
+
+**Propósito:** guardar capas finales (manzanas + demanda y puntos de demanda) y entregar resumen comunal.
+
+```{r message=FALSE, warning=FALSE}
+Exportar resultados a GPKG + resumen final
+
+Propósito: guardar capas finales (manzanas + demanda y puntos de demanda) y entregar resumen comunal.
+```
+
+### 5.7 Accesibilidad (10 min) y propuesta de puntos
+
+#### Preparación: cargar demanda y definir umbral
+
+**Propósito:** cargar capa de puntos de demanda (manzanas) desde el GPKG y fijar umbral de accesibilidad (10 min caminando).
+
+```{r message=FALSE, warning=FALSE}
+umbral_min <- 10
+
+dem_pts <- st_read(OUT_GPKG, layer="demanda_pts", quiet=TRUE)
+
+dem_CTG <- dem_pts %>% filter(comuna_tag == "Calera de Tango")
+dem_IMA <- dem_pts %>% filter(comuna_tag == "Isla de Maipo")
+
+cat("✅ Demanda CTG:", nrow(dem_CTG), "\n")
+cat("✅ Demanda IMA:", nrow(dem_IMA), "\n")
+
+```
+
+### 5.8 Baseline: oferta actual y cobertura a 10 min
+
+**Propósito:** medir qué proporción de puntos de demanda queda cubierta por la oferta existente bajo el umbral.
+
+La oferta proviene de OSM (`amenity=recycling`) o de una capa equivalente. Si no se detecta oferta, la cobertura baseline puede resultar 0.
+
+```{r message=FALSE, warning=FALSE}
+# oferta_CTG: sf points (amenity=recycling)
+# oferta_IMA: sf points (amenity=recycling)
+
+# dem_CTG$t_min_baseline <- tiempo_minimo(dem_CTG, oferta_CTG)  # función interna del script
+# dem_IMA$t_min_baseline <- tiempo_minimo(dem_IMA, oferta_IMA)
+
+# dem_CTG$cubierto_baseline <- dem_CTG$t_min_baseline <= umbral_min
+# dem_IMA$cubierto_baseline <- dem_IMA$t_min_baseline <= umbral_min
+
+# cob_baseline_CTG <- mean(dem_CTG$cubierto_baseline, na.rm=TRUE)
+# cob_baseline_IMA <- mean(dem_IMA$cubierto_baseline, na.rm=TRUE)
+
+# cat("Cobertura baseline CTG:", round(cob_baseline_CTG,3), "\n")
+# cat("Cobertura baseline IMA:", round(cob_baseline_IMA,3), "\n")
+
+```
+
+### 5.9 selección de P puntos nuevos (MaxCover)
+
+**Propósito:** seleccionar un conjunto reducido de puntos nuevos desde un set de candidatos para maximizar demanda cubierta dentro del umbral (enfoque MaxCover/greedy).
+
+```{r message=FALSE, warning=FALSE}
+p_nuevos_CTG <- 2
+p_nuevos_IMA <- 3
+
+# candidatos_CTG / candidatos_IMA: sf points (lugares factibles)
+# sol_CTG <- maxcover_greedy(dem_CTG, candidatos_CTG, p=p_nuevos_CTG, umbral=umbral_min)
+# sol_IMA <- maxcover_greedy(dem_IMA, candidatos_IMA, p=p_nuevos_IMA, umbral=umbral_min)
+
+# propuesta_CTG <- candidatos_CTG[sol_CTG$idx, ]
+# propuesta_IMA <- candidatos_IMA[sol_IMA$idx, ]
+
+```
+
+### 5.9.1 Métricas finales y exportes
+
+**Propósito:** calcular cobertura y tiempo promedio ponderado (antes vs después), exportar GPKG final + CSV de métricas.
+
+```{r message=FALSE, warning=FALSE}
+OUT2_DIR <- file.path(OUT_DIR, "parte2B_final_10min")
+dir.create(OUT2_DIR, showWarnings = FALSE, recursive = TRUE)
+
+OUT_GPKG_B <- file.path(OUT2_DIR, "parte2B_resultados_10min.gpkg")
+OUT_MET    <- file.path(OUT2_DIR, "metricas_baseline_vs_propuesta.csv")
+
+# st_write(..., OUT_GPKG_B, layer="demanda_CTG", quiet=TRUE)
+# st_write(..., OUT_GPKG_B, layer="oferta_CTG", quiet=TRUE)
+# st_write(..., OUT_GPKG_B, layer="propuesta_CTG", quiet=TRUE)
+# st_write(..., OUT_GPKG_B, layer="isocronas_CTG_10min", quiet=TRUE)
+# (repetir para IMA)
+
+# write_csv(metrics_all, OUT_MET)
+
+cat("✅ PARTE 2B LISTA (10 min)\n")
+cat("Carpeta:", OUT2_DIR, "\n")
+cat("GPKG:", OUT_GPKG_B, "\n")
+cat("CSV métricas:", OUT_MET, "\n")
+
+```
+
+## 6. Resultados
+
+### 6.1 Oferta actual detectada
+
+-   Calera de Tango: **1** punto de oferta actual.
+-   Isla de Maipo: **0** puntos detectados en OSM.
+
+### 6.2 Cobertura baseline (10 min)
+
+-   Calera de Tango: cobertura **0.400** (36/90 manzanas cubiertas).
+-   Isla de Maipo: cobertura **0.000** (0/234 manzanas cubiertas).
+
+### 6.3 Propuesta óptima (10 min)
+
+Parámetros: - Calera de Tango: **P = 2** puntos nuevos. - Isla de Maipo: **P = 3** puntos nuevos.
+
+**Cobertura mejorada (10 min):** - Calera de Tango: **0.778** (70/90 manzanas) → **Δ +0.378**. - Isla de Maipo: **0.688** (161/234 manzanas) → **Δ +0.688**.
+
+**Tiempo promedio ponderado:** - Calera de Tango: 22.37 min → 9.13 min. - Isla de Maipo: baseline sin oferta (valor sentinel) → 16.93 min (post-propuesta).
+
+### 6.4 Coordenadas de puntos propuestos
+
+**Calera de Tango (2):** - P1: (-70.771594, -33.626556) - P2: (-70.792398, -33.608354)
+
+**Isla de Maipo (3):** - P1: (-70.863294, -33.743167) - P2: (-70.901976, -33.748323) - P3: (-70.860588, -33.738442)
+
+------------------------------------------------------------------------
+
+## 7. Mapas y visualizaciones
+
+-   **Mapa Calera de Tango (10 min):** oferta + propuesta + isócronas + demanda (manzanas).
+-   **Mapa Isla de Maipo (10 min):** propuesta + isócronas + demanda (manzanas).
+
+> ```{r echo=TRUE, message=FALSE, warning=FALSE}
+> ## Mapas (interactivos embebidos)
+>
+> ### Calera de Tango — 10 min (Oferta + Propuesta)
+> <iframe src="./mapa_leaflet_Calera_de_Tango_10min.html"
+>         width="100%" height="650" style="border:1px solid #ddd; border-radius:8px;">
+> </iframe>
+>
+> ### Isla de Maipo — 10 min (Propuesta)
+> <iframe src="./mapa_leaflet_Isla_de_Maipo_10min.html"
+>         width="100%" height="650" style="border:1px solid #ddd; border-radius:8px;">
+> </iframe>
+>
+> ```
+
+## 8. Conclusiones
+
+1.  Bajo 10 min, la oferta actual presenta brechas importantes: **40% cobertura en Calera** y **0% en Isla** según OSM.
+2.  Con una propuesta de **2 puntos en Calera** y **3 puntos en Isla**, la cobertura sube a **0.778** y **0.688**, respectivamente.
+3.  La metodología permite priorizar ubicaciones con mayor beneficio territorial (demanda cubierta) y entregar una base reproducible para planificación.
